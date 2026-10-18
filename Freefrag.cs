@@ -2283,61 +2283,6 @@ public class Freefrag : BasePlugin
         PrintEditorChat(player, "addbot.saved", added, practice.PracticeName);
     }
 
-    /// <summary>
-    /// Spike (2026-10-18, throwaway, removed by the swinging-bots plan's Task 5): spawns a marker entity 300 units
-    /// ahead of the player and unfreezes their nearest managed bot, to see whether the behaviour tree's
-    /// CLASSNAME sensor finds a plugin-spawned entity and runs the bot to it. Nothing is cleaned up.
-    /// </summary>
-    private void HandleSwingTestCommand(CCSPlayerController player, string className)
-    {
-        if (!_modeGate.Active || !_playerStatuses.TryGetValue(player.Slot, out var status) || status.PracticeIndex < 0)
-        {
-            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}swingtest: start a route first.");
-            return;
-        }
-        var pawn = player.PlayerPawn.Value;
-        if (pawn == null || pawn.AbsOrigin == null)
-            return;
-        if (string.IsNullOrEmpty(className))
-            className = "info_target";
-
-        var yaw = pawn.EyeAngles.Y * MathF.PI / 180f;
-        var spot = new Vector(pawn.AbsOrigin.X + MathF.Cos(yaw) * 300f, pawn.AbsOrigin.Y + MathF.Sin(yaw) * 300f, pawn.AbsOrigin.Z);
-        var marker = Utilities.CreateEntityByName<CBaseEntity>(className);
-        if (marker == null || !marker.IsValid)
-        {
-            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.Red}swingtest: could not create {className}.");
-            return;
-        }
-        marker.Teleport(spot, QAngle.Zero, Vector.Zero);
-        marker.DispatchSpawn();
-
-        CCSPlayerController? nearest = null;
-        var best = float.MaxValue;
-        foreach (var botSlot in status.Bots)
-        {
-            var bot = Utilities.GetPlayerFromSlot(botSlot);
-            var bp = bot?.PlayerPawn.Value?.AbsOrigin;
-            if (bot == null || !bot.IsValid || !bot.PawnIsAlive || bp == null) continue;
-            var dx = bp.X - pawn.AbsOrigin.X; var dy = bp.Y - pawn.AbsOrigin.Y; var dz = bp.Z - pawn.AbsOrigin.Z;
-            var d = dx * dx + dy * dy + dz * dz;
-            if (d < best) { best = d; nearest = bot; }
-        }
-        if (nearest?.PlayerPawn.Value == null)
-        {
-            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.Red}swingtest: no live bot to release.");
-            return;
-        }
-        var botPawn = nearest.PlayerPawn.Value;
-        botPawn.MoveType = MoveType_t.MOVETYPE_WALK;
-        Schema.SetSchemaValue(botPawn.Handle, "CBaseEntity", "m_nActualMoveType", 2);
-        Utilities.SetStateChanged(botPawn, "CBaseEntity", "m_MoveType");
-
-        var msg = $"swingtest: {className} #{marker.Index} at ({spot.X:F0} {spot.Y:F0} {spot.Z:F0}), released {nearest.PlayerName} ({MathF.Sqrt(best):F0} units away).";
-        Console.WriteLine($"[Freefrag] {msg}");
-        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{msg}");
-    }
-
     private void HandleNewRouteCommand(CCSPlayerController player, string name, string botsArg)
     {
         if (!_modeGate.Active)
@@ -3121,9 +3066,6 @@ public class Freefrag : BasePlugin
                         return;
                     case "newroute":
                         HandleNewRouteCommand(player, commandInfo.ArgByIndex(2), commandInfo.ArgByIndex(3));
-                        return;
-                    case "swingtest":
-                        HandleSwingTestCommand(player, commandInfo.ArgByIndex(2));
                         return;
                     case "exit":
                         ForceStopPractice(player);

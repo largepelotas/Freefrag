@@ -82,7 +82,7 @@
 										}
 									}
 								},
-							// Else: attack if we see an enemy; a walking bot with no enemy runs at the nearest human (spike fallback)
+							// Else: attack if we see an enemy; a released swinger (walking, no enemy yet) runs at the nearest human. Static bots are frozen, so this is inert for them.
 							{
 								type = "selector"
 								children =
@@ -95,21 +95,21 @@
 									{
 										type = "decorator_sensor"
 										entity_type_filter = "HUMAN_PLAYERS"
-										output = "SwingMarkers"
+										output = "SwingTarget"
 										child =
 										{
 											type = "decorator_picker_nearby"
-											input = "SwingMarkers"
+											input = "SwingTarget"
 											cutoff_distance = 2000
 											child =
 											{
 												type = "condition_is_empty"
-												input = "SwingMarkers"
+												input = "SwingTarget"
 												negated = 1
 												child =
 												{
 													type = "action_move_to"
-													destination = "SwingMarkers"
+													destination = "SwingTarget"
 													movement_type = "BT_ACTION_MOVETO_RUN"
 													route_type = "BT_ACTION_MOVETO_FASTEST_ROUTE"
 													arrival_epsilon = 20

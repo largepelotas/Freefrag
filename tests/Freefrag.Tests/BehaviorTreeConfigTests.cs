@@ -68,4 +68,20 @@ public class BehaviorTreeConfigTests
         Assert.Contains("bt_hard_config.kv3", text);
         Assert.Contains("bt_memorize_enemies_vision.kv3", text);
     }
+
+    [Fact]
+    public void HardModeTreeRunsAtTheHumanWhenNotAttacking()
+    {
+        // Prevents a released swinger standing still (a CLASSNAME sensor cannot see plugin-spawned entities, so the
+        // move target must be the human) or running instead of fighting (attack must come first in the selector).
+        var text = StripComments(File.ReadAllText(RepoFile("resources", "bt", "hard_mode.kv3")));
+        Assert.Single(Regex.Matches(text, @"type\s*=\s*""action_move_to"""));
+        Assert.Matches(@"destination\s*=\s*""SwingTarget""", text);
+        Assert.DoesNotContain("CLASSNAME", text);
+        // Enemy (memory) and Target (aim) sensors were already there; SwingTarget is the third.
+        var humanSensors = Regex.Matches(text, @"entity_type_filter\s*=\s*""HUMAN_PLAYERS""\s*output\s*=\s*""(\w+)""");
+        Assert.Equal(new[] { "Enemy", "Target", "SwingTarget" }, humanSensors.Select(m => m.Groups[1].Value).ToArray());
+        Assert.True(text.IndexOf("bt_attack.kv3", StringComparison.Ordinal) < text.IndexOf("SwingTarget", StringComparison.Ordinal),
+            "attack must precede the swing branch in the selector");
+    }
 }
