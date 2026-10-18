@@ -17,7 +17,7 @@ namespace OpenPrefirePrac;
 public class OpenPrefirePrac : BasePlugin
 {
     public override string ModuleName => "Open Prefire Prac";
-    public override string ModuleVersion => "0.1.49";
+    public override string ModuleVersion => "0.1.50";
     public override string ModuleAuthor => "Lengran";
     public override string ModuleDescription => "A plugin for practicing prefire in CS2. https://github.com/largepelotas/OpenPrefirePrac (fork of lengran/OpenPrefirePrac)";
 
@@ -1176,6 +1176,18 @@ public class OpenPrefirePrac : BasePlugin
         player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.saved", count, practice.PracticeName)}");
     }
 
+    /// <summary>
+    /// Path of a bundled behavior tree relative to game/csgo, derived from where the plugin actually lives
+    /// (plugins/disabled/OpenPrefirePrac on kus/cs2-modded-server) instead of a hardcoded plugins/OpenPrefirePrac.
+    /// </summary>
+    private string BehaviorTreePath(string file)
+    {
+        var dir = ModuleDirectory.Replace('\\', '/');
+        var idx = dir.IndexOf("/addons/", StringComparison.OrdinalIgnoreCase);
+        var rel = idx >= 0 ? dir[(idx + 1)..] : "addons/counterstrikesharp/plugins/OpenPrefirePrac";
+        return $"{rel}/resources/bt/{file}".Replace('/', '\\');
+    }
+
     private void SaveConvars()
     {
         string[] boolConvarNames = [
@@ -1394,7 +1406,7 @@ public class OpenPrefirePrac : BasePlugin
         // Set behavior tree for bots (many thanks to 5EPlay)
         if (_defaultPlayerSettings!.BotAimLock == 2)
         {
-            Server.ExecuteCommand("mp_bot_ai_bt \"addons\\counterstrikesharp\\plugins\\OpenPrefirePrac\\resources\\bt\\hard_mode.kv3\"");
+            Server.ExecuteCommand($"mp_bot_ai_bt \"{BehaviorTreePath("hard_mode.kv3")}\"");
             Server.ExecuteCommand("mp_bot_ai_bt_clear_cache");
         }
 
