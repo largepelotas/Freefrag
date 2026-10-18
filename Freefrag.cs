@@ -51,7 +51,8 @@ public class Freefrag : BasePlugin
     // Diagnostics (temporary, 2026-10-18): true holds every landing watch open to its 32-tick deadline so the
     // logged Z trace shows whether a teleported bot ever falls; false restores the settle test.
     private const bool LandingDiagnosticsHold = true;
-    private const float LandingDiagnosticsLift = 16f;    // units above the target to teleport to; 0 restores normal placement
+    private const float LandingDiagnosticsLift = 16f;
+    private const bool LandingDiagnosticsPulse = true;   // flip the duck state once after the teleport to wake the bot's movement    // units above the target to teleport to; 0 restores normal placement
     private readonly Dictionary<int, LandingWatch> _landingWatches = new();   // Key: bot slot. Bots waiting to touch ground before FreezeBot.
     private readonly HashSet<int> _landingTimeoutLogged = new();              // Owner slots whose current route start already logged a landing timeout.
     private const uint FL_ONGROUND = 1u << 0;
@@ -1553,6 +1554,17 @@ public class Freefrag : BasePlugin
         if (player.IsBot)
         {
             var movementService = new CCSPlayer_MovementServices(player.PlayerPawn.Value.MovementServices!.Handle);
+            if (LandingDiagnosticsPulse)
+            {
+                // Diagnostic experiment (2026-10-18): a duck-state change seems to be what makes the engine simulate an
+                // idle bot after a teleport. Flip the state the wrong way first; the timers below set the right one.
+                AddTimer(0.02f, () =>
+                {
+                    if (!player.IsValid || player.PlayerPawn.Value?.Bot == null) return;
+                    movementService.DuckAmount = crouch ? 0 : 1;
+                    player.PlayerPawn.Value.Bot.IsCrouching = !crouch;
+                });
+            }
             if (crouch)
             {
                 AddTimer(0.05f, () => movementService.DuckAmount = 1);
