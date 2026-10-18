@@ -17,7 +17,7 @@ namespace OpenPrefirePrac;
 public class OpenPrefirePrac : BasePlugin
 {
     public override string ModuleName => "Open Prefire Prac";
-    public override string ModuleVersion => "0.1.48";
+    public override string ModuleVersion => "0.1.49";
     public override string ModuleAuthor => "Lengran";
     public override string ModuleDescription => "A plugin for practicing prefire in CS2. https://github.com/largepelotas/OpenPrefirePrac (fork of lengran/OpenPrefirePrac)";
 
@@ -1004,6 +1004,15 @@ public class OpenPrefirePrac : BasePlugin
     private const float RecordMinDistance = 50f;        // units between joints
     private const float RecordHeightOffset = 8f;        // lift the line slightly off the floor
 
+    /// <summary>While recording the player cannot take damage, so the route can be walked without the bots interrupting.</summary>
+    private static void SetInvulnerable(CCSPlayerController? player, bool invulnerable)
+    {
+        var pawn = player?.PlayerPawn.Value;
+        if (player == null || !player.IsValid || pawn == null || !pawn.IsValid)
+            return;
+        pawn.TakesDamage = !invulnerable;
+    }
+
     private void HandleRecordCommand(CCSPlayerController player, string subCommand)
     {
         var slot = player.Slot;
@@ -1058,6 +1067,7 @@ public class OpenPrefirePrac : BasePlugin
             return;
 
         status.IsRecording = true;
+        SetInvulnerable(player, true);
         var feet = GetPlayerFeet(player);
         if (feet != null && (status.RecordedPoints.Count == 0 || PrefirePractice.FarEnough(status.RecordedPoints[^1], feet.Value, RecordMinDistance)))
             AddRecordedPoint(slot, feet.Value);
@@ -1076,6 +1086,8 @@ public class OpenPrefirePrac : BasePlugin
             StopRecording(slot);
             return;
         }
+
+        SetInvulnerable(player, true);      // survives a respawn mid-recording
 
         var feet = GetPlayerFeet(player);
         if (feet == null)
@@ -1105,6 +1117,7 @@ public class OpenPrefirePrac : BasePlugin
         status.IsRecording = false;
         status.RecordingTimer?.Kill();
         status.RecordingTimer = null;
+        SetInvulnerable(Utilities.GetPlayerFromSlot(slot), false);
     }
 
     private void ClearRecording(int slot)
