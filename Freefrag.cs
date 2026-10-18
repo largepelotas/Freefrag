@@ -51,6 +51,7 @@ public class Freefrag : BasePlugin
     private readonly Dictionary<int, LandingWatch> _landingWatches = new();
     private readonly HashSet<int> _landingTimeoutLogged = new();              // Owner slots whose current route start already logged a landing timeout.
     private readonly HashSet<(string Route, int Target)> _landingNeverMovedLogged = new();   // Route targets already reported as never simulated; cleared on map start.              // Owner slots whose current route start already logged a landing timeout.
+    private readonly HashSet<(string Route, int Target)> _swingTimeoutLogged = new();      // Swinger route targets already reported as never reaching their peek point; cleared on map start.
     private const uint FL_ONGROUND = 1u << 0;
 
     private const float BotSpawnInterval = 0.1f;
@@ -419,6 +420,7 @@ public class Freefrag : BasePlugin
         {
             RemoveAllGlow(ownerSlot);
             ClearDraftBots(ownerSlot);
+            ClearSwingers(ownerSlot);
         }
 
         if (hotReload)
@@ -565,11 +567,13 @@ public class Freefrag : BasePlugin
             status.GlowEntities.Clear();
             status.DraftBots.Clear();
             status.DraftBotBeams.Clear();
+            status.Swingers.Clear();
             status.RecordingBeams.Clear();
             status.Beams.Clear();
             status.CompletedRoutes.Clear();     // route names are per map
         }
         _landingNeverMovedLogged.Clear();       // report each bad route line once per map load
+        _swingTimeoutLogged.Clear();
         _glowCount = 0;
 
         // load practices available in current map, from corresponding map directory.
@@ -660,6 +664,17 @@ public class Freefrag : BasePlugin
                             RouteName = _practices[practiceIndex].PracticeName,
                             TargetIndex = _playerStatuses[ownerSlot].EnabledTargets[targetNo],
                         };
+                        if (target.IsSwinger && _playerStatuses.TryGetValue(ownerSlot, out var swingOwner))
+                        {
+                            swingOwner.Swingers[playerOrBot.Slot] = new SwingState
+                            {
+                                Peek = target.Peek!.Value,
+                                Trigger = SwingRelease.EffectiveTrigger(target.Peek.Value.Trigger, _defaultPlayerSettings!.SwingTrigger),
+                                HideX = position.X, HideY = position.Y, HideZ = position.Z,
+                                RouteName = _practices[practiceIndex].PracticeName,
+                                TargetIndex = _playerStatuses[ownerSlot].EnabledTargets[targetNo],
+                            };
+                        }
                     });
                     AddTimer(0.6f, () => { if (StillOwned()) ApplyGlow(ownerSlot, playerOrBot); });
                     
@@ -772,6 +787,8 @@ public class Freefrag : BasePlugin
                 int ownerSlot = _ownerOfBots[playerOrBot.Slot];
                 RemoveGlow(ownerSlot, playerOrBot.Slot);
                 _landingWatches.Remove(playerOrBot.Slot);
+                if (_playerStatuses.TryGetValue(ownerSlot, out var deadSwingOwner))
+                    deadSwingOwner.Swingers.Remove(playerOrBot.Slot);
                 var targetNo = _playerStatuses[ownerSlot].Progress;
                 var practiceIndex = _playerStatuses[ownerSlot].PracticeIndex;
 
@@ -1605,6 +1622,48 @@ public class Freefrag : BasePlugin
         pawn.MoveType = frozen ? MoveType_t.MOVETYPE_VPHYSICS : MoveType_t.MOVETYPE_WALK;
         Schema.SetSchemaValue(pawn.Handle, "CBaseEntity", "m_nActualMoveType", frozen ? 5 : 2);
         Utilities.SetStateChanged(pawn, "CBaseEntity", "m_MoveType");
+    }
+
+    private void ReleaseSwinger(int ownerSlot, int botSlot)
+    {
+        if (!_playerStatuses.TryGetValue(ownerSlot, out var status) || !status.Swingers.TryGetValue(botSlot, out var state))
+            return;
+        var bot = Utilities.GetPlayerFromSlot(botSlot);
+        if (bot == null || !bot.IsValid || !bot.PawnIsAlive)
+            return;
+
+        // Unfreeze exactly as SetPlayerFrozen does; the behaviour tree then runs the bot at the nearest human.
+        SetPlayerFrozen(bot, false);
+        state.Released = true;
+        state.ReleasedTick = Server.TickCount;
+        Console.WriteLine($"[Freefrag] Released swinger {bot.PlayerName} for slot {ownerSlot} towards its peek point.");
+    }
+
+    private void FreezeSwinger(int ownerSlot, int botSlot, int tick)
+    {
+        if (!_playerStatuses.TryGetValue(ownerSlot, out var status) || !status.Swingers.TryGetValue(botSlot, out var state))
+            return;
+        var bot = Utilities.GetPlayerFromSlot(botSlot);
+        if (bot == null || !bot.IsValid)
+            return;
+
+        var feet = bot.PlayerPawn.Value?.AbsOrigin;
+        FreezeBot(bot);
+        state.Frozen = true;
+        // The bot may have reached its peek point on the very tick the cap ran out; that is an arrival.
+        var reached = feet != null && SwingRelease.AtPeek(state, feet.X, feet.Y, feet.Z);
+        if (SwingRelease.TimedOut(state, tick) && !reached && _swingTimeoutLogged.Add((state.RouteName, state.TargetIndex)))
+        {
+            Console.WriteLine($"[Freefrag] Swinger {bot.PlayerName} on {state.RouteName} target {state.TargetIndex + 1} never reached its peek point; frozen after 2 s.");
+        }
+    }
+
+    // Drops every swing state of this owner. Running swingers were excluded from the aim lock only through
+    // their state, so removing it gives the lock back.
+    private void ClearSwingers(int ownerSlot)
+    {
+        if (_playerStatuses.TryGetValue(ownerSlot, out var status))
+            SwingRelease.TakeStates(status.Swingers);
     }
 
     // True while this exact player (not a later occupant of the same slot) is still connected and registered.
@@ -3732,6 +3791,7 @@ public class Freefrag : BasePlugin
             StopRecording(playerSlot);
             ClearRecording(playerSlot);
             ClearDraftBots(playerSlot);
+            ClearSwingers(playerSlot);
             RemoveBots(playerSlot);
             DeleteGuidingLine(playerSlot);
 
@@ -4022,6 +4082,7 @@ public class Freefrag : BasePlugin
             if (_playerStatuses.TryGetValue(ownerSlot, out var ownerStatus))
             {
                 ownerStatus.Bots.Remove(botSlot);
+                ownerStatus.Swingers.Remove(botSlot);
             }
             _ownerOfBots.Remove(botSlot);
         }
@@ -4220,7 +4281,44 @@ public class Freefrag : BasePlugin
                 {
                     Console.WriteLine($"[Freefrag] Route {watch.RouteName} target {watch.TargetIndex + 1} (z {watch.TargetZ:F2}): the bot never moved after its teleport, so the spot is probably off the nav mesh and it sits exactly where the file puts it. Re-place it in game with !freefrag addbot and drop the old line.");
                 }
+                // A swinger may only be released once it is on the ground and frozen at its hiding spot.
+                if (_ownerOfBots.TryGetValue(watchSlot, out var landedOwner)
+                    && _playerStatuses.TryGetValue(landedOwner, out var landedStatus)
+                    && landedStatus.Swingers.TryGetValue(watchSlot, out var landedSwing))
+                {
+                    landedSwing.Landed = true;
+                }
                 FreezeBot(watchedBot);
+            }
+        }
+
+        // Swing pass: a landed swinger is released when its owner comes within the trigger distance, and a
+        // released one is frozen again at its peek point (or after SwingRelease.MaxRunTicks) so it fights from there.
+        foreach (var (swingOwnerSlot, swingOwnerStatus) in _playerStatuses)
+        {
+            if (swingOwnerStatus.Swingers.Count == 0)
+                continue;
+
+            var swingOwnerPlayer = Utilities.GetPlayerFromSlot(swingOwnerSlot);
+            var ownerFeet = swingOwnerPlayer?.PlayerPawn.Value?.AbsOrigin;
+            var ownerAlive = swingOwnerStatus.PracticeIndex >= 0 && swingOwnerPlayer != null && swingOwnerPlayer.IsValid && swingOwnerPlayer.PawnIsAlive && ownerFeet != null;
+
+            foreach (var (swingBotSlot, swingState) in swingOwnerStatus.Swingers.ToArray())
+            {
+                var swingBot = Utilities.GetPlayerFromSlot(swingBotSlot);
+                var botFeet = swingBot?.PlayerPawn.Value?.AbsOrigin;
+                if (swingBot == null || !swingBot.IsValid || !swingBot.PawnIsAlive || botFeet == null)
+                {
+                    swingOwnerStatus.Swingers.Remove(swingBotSlot);     // dead or gone; a respawn creates a fresh state
+                    continue;
+                }
+                if (!ownerAlive)
+                    continue;
+
+                if (SwingRelease.ShouldRelease(swingState, ownerFeet!.X, ownerFeet.Y, ownerFeet.Z))
+                    ReleaseSwinger(swingOwnerSlot, swingBotSlot);
+                else if (SwingRelease.Arrived(swingState, botFeet.X, botFeet.Y, botFeet.Z, Server.TickCount))
+                    FreezeSwinger(swingOwnerSlot, swingBotSlot, Server.TickCount);
             }
         }
 
@@ -4247,6 +4345,12 @@ public class Freefrag : BasePlugin
                     var bot = Utilities.GetPlayerFromSlot(botSlot);
 
                     if (bot == null || !bot.IsValid || !bot.PawnIsAlive || bot.PlayerPawn.Value == null)
+                    {
+                        continue;
+                    }
+
+                    // A running swinger is steered by the behaviour tree; the per-tick angle teleport below cancels its move.
+                    if (_playerStatuses[playerSlot].Swingers.TryGetValue(botSlot, out var runningSwing) && runningSwing.Released && !runningSwing.Frozen)
                     {
                         continue;
                     }

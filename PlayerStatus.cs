@@ -22,6 +22,7 @@ public class PlayerStatus
     public int HealingMethod = 3;
     
     public readonly List<int> Bots = new();         // slot of bots
+    public readonly Dictionary<int, SwingState> Swingers = new();   // bot slot -> swing state, for route targets with a peek spec
     public readonly Dictionary<string, int> LocalizedPracticeNames = new();
     public readonly Dictionary<string, int> LocalizedDifficultyNames = new();
     
