@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
 public class DefaultConfig
 {
@@ -57,7 +57,7 @@ public class DefaultConfig
         if (!File.Exists(path))
         {
             // Use default settings
-            Console.WriteLine("[OpenPrefirePrac] No custom settings provided. Will use default settings.");
+            Console.WriteLine("[Freefrag] No custom settings provided. Will use default settings.");
         }
         else
         {
@@ -131,11 +131,11 @@ public class DefaultConfig
                     EquipPlayer = jsonConfig.EquipPlayer;
                 }
 
-                Console.WriteLine($"[OpenPrefirePrac] Using default settings: Difficulty = {Difficulty}, TrainingMode = {TrainingMode}, BotWeapon = {BotWeapon}, PlayerGun = {PlayerGun}, Jitter = {Jitter}, HeadshotOnly = {HeadshotOnly}, Xray = {Xray}, MenuType = {MenuType}, MenuRows = {MenuRows}, BotAimLock = {BotAimLock}, EquipPlayer = {EquipPlayer}");
+                Console.WriteLine($"[Freefrag] Using default settings: Difficulty = {Difficulty}, TrainingMode = {TrainingMode}, BotWeapon = {BotWeapon}, PlayerGun = {PlayerGun}, Jitter = {Jitter}, HeadshotOnly = {HeadshotOnly}, Xray = {Xray}, MenuType = {MenuType}, MenuRows = {MenuRows}, BotAimLock = {BotAimLock}, EquipPlayer = {EquipPlayer}");
             }
             catch (System.Exception)
             {
-                Console.WriteLine("[OpenPrefirePrac] Failed to load custom settings. Will use default settings.");
+                Console.WriteLine("[Freefrag] Failed to load custom settings. Will use default settings.");
             }
         }
     }

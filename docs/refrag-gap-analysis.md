@@ -76,7 +76,7 @@ MapConfigurator, RCON.
 
 ## 3. Gaps, by how to close them
 
-### A. Build into OpenPrefirePrac (the real Refrag-only stuff)
+### A. Build into Freefrag (the real Refrag-only stuff)
 These are what the subscription buys that no free plugin provides. Ranked by value ÷ effort.
 
 1. **Quality-of-life parity for Prefire** — small, high-impact, all server-side cvars or

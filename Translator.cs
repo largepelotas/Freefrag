@@ -5,7 +5,7 @@ using System.Globalization;
 using MaxMind.GeoIP2;
 using CounterStrikeSharp.API.Modules.Utils;
 
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
 public class Translator
 {
@@ -147,7 +147,7 @@ public class Translator
         // check if the database file exists
         if (!File.Exists(geoDbPath))
         {
-            Console.WriteLine("[OpenPrefirePrac] GeoLite2-Country.mmdb not found.");
+            Console.WriteLine("[Freefrag] GeoLite2-Country.mmdb not found.");
             return null;
         }
         
@@ -159,7 +159,7 @@ public class Translator
         }
         catch (Exception ex)
         {
-            Console.WriteLine("[OpenPrefirePrac] Get Player's ISO code failed: " + ex.Message);
+            Console.WriteLine("[Freefrag] Get Player's ISO code failed: " + ex.Message);
             return null;
         }
     }

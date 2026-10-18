@@ -1,6 +1,6 @@
-# OpenPrefirePrac
+# Klitch's Freefrag
 
-An open-source CounterStrikeSharp powered server-side practicing plugin for CS2. It provides multiple prefire practices on competitive map pool maps and support multiplayer practicing concurrently.
+Klitch's Freefrag is a fork of [OpenPrefirePrac](https://github.com/lengran/OpenPrefirePrac) by Lengran: an open-source CounterStrikeSharp powered server-side practicing plugin for CS2. It provides multiple prefire practices on competitive map pool maps and support multiplayer practicing concurrently.
 
 ## Get started
 
@@ -10,7 +10,7 @@ An open-source CounterStrikeSharp powered server-side practicing plugin for CS2.
 
 ### Installation
 
-Download [the latest release files](https://github.com/lengran/OpenPrefirePrac/releases) and extract all files into "**game/csgo/addons/counterstrikesharp/plugins/OpenPrefirePrac/**".
+Download [the latest release files](https://github.com/largepelotas/OpenPrefirePrac/releases) and extract all files into "**game/csgo/addons/counterstrikesharp/plugins/Freefrag/**".
 
 To install the latest version of CounterStrikeSharp, please refer to this [guide](https://docs.cssharp.dev/docs/guides/getting-started.html).
 

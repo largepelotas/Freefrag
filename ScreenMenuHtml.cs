@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
 /// <summary>Builds the centre-screen HTML for one menu level (pure; no engine types).</summary>
 public static class ScreenMenuHtml

@@ -1,6 +1,6 @@
 using CounterStrikeSharp.API.Core;
 
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
 /// <summary>
 /// One entry of a menu. Either OnChoose runs when picked, or Submenu (built lazily, when picked)

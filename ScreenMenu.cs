@@ -1,7 +1,7 @@
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
 /// <summary>
 /// Renders MenuSpecs in the centre-screen HTML area. Navigation is driven only by the plugin's
@@ -106,7 +106,7 @@ public sealed class ScreenMenu
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[OpenPrefirePrac] Menu action failed: {ex.GetType().Name}: {ex.Message}");
+            Console.WriteLine($"[Freefrag] Menu action failed: {ex.GetType().Name}: {ex.Message}");
             Close(player);
         }
     }

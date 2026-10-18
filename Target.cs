@@ -1,7 +1,7 @@
 using CounterStrikeSharp.API.Modules.Utils;
 using Vector = CounterStrikeSharp.API.Modules.Utils.Vector;
 
-namespace OpenPrefirePrac;
+namespace Freefrag;
 public class TargetBot
 {
     public readonly Vector Position;
@@ -108,7 +108,7 @@ public class PrefirePractice
         // Construct a practice from the description file.
         PracticeName = practice;
         var path = $"{moduleDirectory}/maps/{map}/{practice}.txt";
-        // Console.WriteLine("[OpenPrefirePrac] Reading practice file: " + path);
+        // Console.WriteLine("[Freefrag] Reading practice file: " + path);
         
         using var sr = File.OpenText(path);
 
@@ -116,7 +116,7 @@ public class PrefirePractice
         var s = sr.ReadLine();
         if (s == null)
         {
-            throw new Exception($"[OpenPrefirePrac] Reading practice file error (1st line): {path}");
+            throw new Exception($"[Freefrag] Reading practice file error (1st line): {path}");
         }
             
         var w = s.Split(Delimiters);
@@ -129,7 +129,7 @@ public class PrefirePractice
         s = sr.ReadLine();
         if (s == null)
         {
-            throw new Exception($"[OpenPrefirePrac] Reading practice file error (2nd line): {path}");
+            throw new Exception($"[Freefrag] Reading practice file error (2nd line): {path}");
         }
             
         w = s.Split(Delimiters);
@@ -140,7 +140,7 @@ public class PrefirePractice
         s = sr.ReadLine();
         if (s == null)
         {
-            throw new Exception($"[OpenPrefirePrac] Reading practice file error (3rd line): {path}");
+            throw new Exception($"[Freefrag] Reading practice file error (3rd line): {path}");
         }
             
         w = s.Split(Delimiters);

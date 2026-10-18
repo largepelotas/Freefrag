@@ -12,14 +12,14 @@ using CounterStrikeSharp.API.Core.Commands;
 using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Entities;
 
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
-public class OpenPrefirePrac : BasePlugin
+public class Freefrag : BasePlugin
 {
-    public override string ModuleName => "Open Prefire Prac";
-    public override string ModuleVersion => "0.1.54";
-    public override string ModuleAuthor => "Lengran";
-    public override string ModuleDescription => "A plugin for practicing prefire in CS2. https://github.com/largepelotas/OpenPrefirePrac (fork of lengran/OpenPrefirePrac)";
+    public override string ModuleName => "Freefrag";
+    public override string ModuleVersion => "0.1.55";
+    public override string ModuleAuthor => "Klitch";
+    public override string ModuleDescription => "Klitch's Freefrag: prefire practice for CS2, a fork of OpenPrefirePrac by Lengran. https://github.com/largepelotas/OpenPrefirePrac";
 
     private readonly Dictionary<int, PlayerStatus> _playerStatuses = new();         // Key: slot of player
     
@@ -48,7 +48,7 @@ public class OpenPrefirePrac : BasePlugin
 
     private const float BotSpawnInterval = 0.1f;
     private const float BotSpawnTimeout = 8f;                      // Seconds after the last bot_add before an unfulfilled request is dropped.
-    private const string ChatPrefix = "[Klitch's Freefrag]";       // Chat-facing name; console log lines keep [OpenPrefirePrac].
+    private const string ChatPrefix = "[Klitch's Freefrag]";       // Chat-facing name; console log lines use [Freefrag].
 
     private DefaultConfig ?_defaultPlayerSettings;
 
@@ -73,11 +73,11 @@ public class OpenPrefirePrac : BasePlugin
             var scoresPath = Path.Combine(ModuleDirectory, "scores.db");
             _scores = new ScoreRepository(scoresPath);
             _scores.EnsureCreated();
-            Console.WriteLine($"[OpenPrefirePrac] Scores DB at {scoresPath}");
+            Console.WriteLine($"[Freefrag] Scores DB at {scoresPath}");
         }
         catch (Exception e)
         {
-            Console.WriteLine($"[OpenPrefirePrac] Scores disabled: {e.Message}");
+            Console.WriteLine($"[Freefrag] Scores disabled: {e.Message}");
             _scores = null;
         }
 
@@ -151,7 +151,7 @@ public class OpenPrefirePrac : BasePlugin
             _timerBroadcastProgress = AddTimer(3f, () => PrintProgress(), TimerFlags.REPEAT);
         }
 
-        Console.WriteLine("[OpenPrefirePrac] Plugin has been loaded. If the plugin is neither loaded along with server startup, nor reloaded on the fly, please reload it once to make it fully functional.");
+        Console.WriteLine("[Freefrag] Plugin has been loaded. If the plugin is neither loaded along with server startup, nor reloaded on the fly, please reload it once to make it fully functional.");
     }
 
     public override void Unload(bool hotReload)
@@ -200,7 +200,7 @@ public class OpenPrefirePrac : BasePlugin
             _timerBroadcastProgress = null;
         }
 
-        Console.WriteLine("[OpenPrefirePrac] Plugin has been unloaded.");
+        Console.WriteLine("[Freefrag] Plugin has been unloaded.");
     }
 
     // TODO: Figure out if we can use the GameEventHandler attribute here instead
@@ -227,7 +227,7 @@ public class OpenPrefirePrac : BasePlugin
                 {
                     _playerStatuses[ownerSlot.Value].Bots.Add(slot);
                     _ownerOfBots.Add(slot, ownerSlot.Value);
-                    Console.WriteLine($"[OpenPrefirePrac] Bot {player.PlayerName}, slot: {slot} (team {player.TeamNum}) assigned to player slot {ownerSlot.Value}.");
+                    Console.WriteLine($"[Freefrag] Bot {player.PlayerName}, slot: {slot} (team {player.TeamNum}) assigned to player slot {ownerSlot.Value}.");
                 }
                 else
                 {
@@ -263,7 +263,7 @@ public class OpenPrefirePrac : BasePlugin
 
         if (player == null)
         {
-            // Console.WriteLine("[OpenPrefirePrac] OnPlayerDisconnect doesn't work now. Player = null.");
+            // Console.WriteLine("[Freefrag] OnPlayerDisconnect doesn't work now. Player = null.");
             return HookResult.Continue;
         }
 
@@ -302,13 +302,13 @@ public class OpenPrefirePrac : BasePlugin
         for (var i = 0; i < mapDirectories.Count; i++)
         {
             var mapPath = mapDirectories[i].Substring(mapDirectories[i].LastIndexOf(Path.DirectorySeparatorChar) + 1);
-            // Console.WriteLine($"[OpenPrefirePrac] Map folder for map {mapPath} found.");
+            // Console.WriteLine($"[Freefrag] Map folder for map {mapPath} found.");
             _availableMaps.Add(mapPath);
 
             if (mapPath.Equals(_mapName))
             {
                 found = true;
-                Console.WriteLine("[OpenPrefirePrac] Map folder for current map found.");
+                Console.WriteLine("[Freefrag] Map folder for current map found.");
             }
         }
 
@@ -318,7 +318,7 @@ public class OpenPrefirePrac : BasePlugin
         }
         else
         {
-            Console.WriteLine("[OpenPrefirePrac] Failed to load practices on map " + _mapName);
+            Console.WriteLine("[Freefrag] Failed to load practices on map " + _mapName);
         }
     }
 
@@ -329,16 +329,16 @@ public class OpenPrefirePrac : BasePlugin
         
         if (playerOrBot == null || !playerOrBot.IsValid|| playerOrBot.IsHLTV)
         {
-            // Console.WriteLine($"[OpenPrefirePrac] DEBUG: player is null or hltv.");
+            // Console.WriteLine($"[Freefrag] DEBUG: player is null or hltv.");
             return HookResult.Continue;
         }
         
         if (playerOrBot.IsBot)
         {
-            // Console.WriteLine($"[OpenPrefirePrac] DEBUG: A bot {playerOrBot.PlayerName} just spawned.");
+            // Console.WriteLine($"[Freefrag] DEBUG: A bot {playerOrBot.PlayerName} just spawned.");
             if (_ownerOfBots.ContainsKey(playerOrBot.Slot))
             {
-                // Console.WriteLine($"[OpenPrefirePrac] DEBUG: {playerOrBot.PlayerName} is a managed bot.");
+                // Console.WriteLine($"[Freefrag] DEBUG: {playerOrBot.PlayerName} is a managed bot.");
                 // For managed bots
                 int ownerSlot = _ownerOfBots[playerOrBot.Slot];
                 var targetNo = _playerStatuses[ownerSlot].Progress;
@@ -348,7 +348,7 @@ public class OpenPrefirePrac : BasePlugin
                 {
                     // If there are more targets to place, move bot to next place
                     _playerStatuses[ownerSlot].Progress++;
-                    // Console.WriteLine($"[OpenPrefirePrac] DEBUG: Update progress to {_playerStatuses[owner].Progress}.");
+                    // Console.WriteLine($"[Freefrag] DEBUG: Update progress to {_playerStatuses[owner].Progress}.");
 
                     AddTimer(0.5f, () => FreezeBot(playerOrBot));
 
@@ -402,13 +402,13 @@ public class OpenPrefirePrac : BasePlugin
             // else if (_playerCount > 0)
             // {
             //     // For unmanaged bots, kick them.
-            //     Console.WriteLine($"[OpenPrefirePrac] Find an unmanaged bot ({playerOrBot.PlayerName}) spawning, kick it.");
+            //     Console.WriteLine($"[Freefrag] Find an unmanaged bot ({playerOrBot.PlayerName}) spawning, kick it.");
             //     KickBot(playerOrBot.Slot);
             // }
         }
         else
         {
-            // Console.WriteLine($"[OpenPrefirePrac] DEBUG: A player {playerOrBot.PlayerName} just spawned.");
+            // Console.WriteLine($"[Freefrag] DEBUG: A player {playerOrBot.PlayerName} just spawned.");
             // For players: Set them up if they are practicing.
             if (!_playerStatuses.ContainsKey(playerOrBot.Slot))
                 return HookResult.Continue;
@@ -431,7 +431,7 @@ public class OpenPrefirePrac : BasePlugin
                 return HookResult.Continue;
             }
 
-            // Console.WriteLine($"[OpenPrefirePrac] DEBUG: Setup player {playerOrBot.PlayerName}.");
+            // Console.WriteLine($"[Freefrag] DEBUG: Setup player {playerOrBot.PlayerName}.");
             SetupPrefireMode(playerOrBot);
         }
 
@@ -462,7 +462,7 @@ public class OpenPrefirePrac : BasePlugin
 
                 if (owner == null || !owner.IsValid || owner.IsBot || owner.IsHLTV)
                 {
-                    Console.WriteLine($"[OpenPrefirePrac] The owner of bot ({playerOrBot.PlayerName}) is not right. This could be a bug.");
+                    Console.WriteLine($"[Freefrag] The owner of bot ({playerOrBot.PlayerName}) is not right. This could be a bug.");
                     return HookResult.Continue;
                 }
 
@@ -542,7 +542,7 @@ public class OpenPrefirePrac : BasePlugin
             // else if (_playerCount > 0)
             // {
             //     // For unmanaged bots, kick them.
-            //     Console.WriteLine($"[OpenPrefirePrac] Find an unmanaged bot ({playerOrBot.PlayerName}) dying, kick it.");
+            //     Console.WriteLine($"[Freefrag] Find an unmanaged bot ({playerOrBot.PlayerName}) dying, kick it.");
             //     KickBot(playerOrBot.Slot);
             // }
         }
@@ -861,7 +861,7 @@ public class OpenPrefirePrac : BasePlugin
 
     private void LoadPractice()
     {
-        Console.WriteLine($"[OpenPrefirePrac] Loading practices for map {_mapName}.");
+        Console.WriteLine($"[Freefrag] Loading practices for map {_mapName}.");
         var practiceFiles = new List<string>(Directory.EnumerateFiles($"{ModuleDirectory}/maps/{_mapName}"));
         _practices.Clear();
         _practiceNameToId.Clear();
@@ -872,7 +872,7 @@ public class OpenPrefirePrac : BasePlugin
             _practices.Add(new PrefirePractice(ModuleDirectory, _mapName, practiceName));
             _practiceNameToId.Add(practiceName, i);
             _pracConflictCount.Add(i, 0);
-            Console.WriteLine($"[OpenPrefirePrac] {_mapName} {practiceName} Loaded.");
+            Console.WriteLine($"[Freefrag] {_mapName} {practiceName} Loaded.");
         }
     }
     
@@ -939,7 +939,7 @@ public class OpenPrefirePrac : BasePlugin
         }
         catch (Exception e)
         {
-            Console.WriteLine($"[OpenPrefirePrac] Failed to read top scores: {e.Message}");
+            Console.WriteLine($"[Freefrag] Failed to read top scores: {e.Message}");
         }
     }
 
@@ -968,7 +968,7 @@ public class OpenPrefirePrac : BasePlugin
         }
         catch (Exception e)
         {
-            Console.WriteLine($"[OpenPrefirePrac] Failed to read stats: {e.Message}");
+            Console.WriteLine($"[Freefrag] Failed to read stats: {e.Message}");
         }
     }
 
@@ -988,7 +988,7 @@ public class OpenPrefirePrac : BasePlugin
         if (owner.SteamID == 0)
         {
             // Unauthenticated (LAN / insecure) players would all share one leaderboard identity.
-            Console.WriteLine($"[OpenPrefirePrac] Score for {owner.PlayerName} not recorded: no SteamID.");
+            Console.WriteLine($"[Freefrag] Score for {owner.PlayerName} not recorded: no SteamID.");
             return;
         }
 
@@ -1001,11 +1001,11 @@ public class OpenPrefirePrac : BasePlugin
                 result.Deaths, result.Kills, result.HeadshotKills, DateTime.UtcNow));
             var line = ScoreFormat.FinishLine(result, prevBest);
             owner.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{line}");
-            Console.WriteLine($"[OpenPrefirePrac] Score: {owner.PlayerName} {_mapName}/{practice.PracticeName} {line}");
+            Console.WriteLine($"[Freefrag] Score: {owner.PlayerName} {_mapName}/{practice.PracticeName} {line}");
         }
         catch (Exception e)
         {
-            Console.WriteLine($"[OpenPrefirePrac] Failed to record score: {e.Message}");
+            Console.WriteLine($"[Freefrag] Failed to record score: {e.Message}");
         }
     }
 
@@ -1023,7 +1023,7 @@ public class OpenPrefirePrac : BasePlugin
 
             if (bot == null || !bot.IsValid)
             {
-                Console.WriteLine($"[OpenPrefirePrac] Error: Player has an invalid bot. Unmanage it.");
+                Console.WriteLine($"[Freefrag] Error: Player has an invalid bot. Unmanage it.");
                 botsToDelete.Add(botSlot);
                 continue;
             }
@@ -1074,7 +1074,7 @@ public class OpenPrefirePrac : BasePlugin
 
             if (bot == null || !bot.IsValid)
             {
-                Console.WriteLine($"[OpenPrefirePrac] Trying to kick an invalid bot (slot {botSlot}). Unmanaging it.");
+                Console.WriteLine($"[Freefrag] Trying to kick an invalid bot (slot {botSlot}). Unmanaging it.");
             }
 
             // KickBot drops the ownership records either way and only sends bot_kick for a valid bot.
@@ -1102,11 +1102,11 @@ public class OpenPrefirePrac : BasePlugin
         }
         else
         {
-            Console.WriteLine($"[OpenPrefirePrac] Not requesting bots for player slot {player.Slot}: not on T or CT (team {player.TeamNum}).");
+            Console.WriteLine($"[Freefrag] Not requesting bots for player slot {player.Slot}: not on T or CT (team {player.TeamNum}).");
             return;
         }
 
-        Console.WriteLine($"[OpenPrefirePrac] Player slot {player.Slot} requests {numberOfBots} bots (queue length {_botRequests.Count}).");
+        Console.WriteLine($"[Freefrag] Player slot {player.Slot} requests {numberOfBots} bots (queue length {_botRequests.Count}).");
 
         var issue = _botRequests.Enqueue(player.Slot, botTeam, numberOfBots);
         if (issue != null)
@@ -1121,7 +1121,7 @@ public class OpenPrefirePrac : BasePlugin
     {
         var joinTeam = issue.BotTeam == BotRequestQueue.TeamT ? "T" : "CT";
         var addCommand = issue.BotTeam == BotRequestQueue.TeamT ? "bot_add_t" : "bot_add_ct";
-        Console.WriteLine($"[OpenPrefirePrac] Creating {issue.Count} {joinTeam} bots for player slot {issue.OwnerSlot}.");
+        Console.WriteLine($"[Freefrag] Creating {issue.Count} {joinTeam} bots for player slot {issue.OwnerSlot}.");
 
         for (var i = 0; i < issue.Count; i++)
         {
@@ -1136,7 +1136,7 @@ public class OpenPrefirePrac : BasePlugin
             var next = _botRequests.ExpireIfStalled(issue.OwnerSlot, issue.IssueId, out var dropped);
             if (dropped > 0)
             {
-                Console.WriteLine($"[OpenPrefirePrac] Bot request of player slot {issue.OwnerSlot} timed out with {dropped} bots missing; dropping it.");
+                Console.WriteLine($"[Freefrag] Bot request of player slot {issue.OwnerSlot} timed out with {dropped} bots missing; dropping it.");
             }
             if (next != null)
             {
@@ -1161,7 +1161,7 @@ public class OpenPrefirePrac : BasePlugin
             return;
         }
 
-        // Console.WriteLine($"[OpenPrefirePrac] DEBUG: {player.PlayerName} moved to spawn point.");
+        // Console.WriteLine($"[Freefrag] DEBUG: {player.PlayerName} moved to spawn point.");
 
         // Only bot can crouch
         if (player.IsBot)
@@ -1184,13 +1184,13 @@ public class OpenPrefirePrac : BasePlugin
 
     private void FreezeBot(CCSPlayerController? bot)
     {
-        // Console.WriteLine($"[OpenPrefirePrac] DEBUG: Trying to freeze a bot.");
+        // Console.WriteLine($"[Freefrag] DEBUG: Trying to freeze a bot.");
         if (bot != null &&
             bot is { IsValid: true, IsBot: true, IsHLTV: false, PawnIsAlive: true } 
             && bot.PlayerPawn.Value != null
         )
         {
-            // Console.WriteLine($"[OpenPrefirePrac] DEBUG: Bot {bot.PlayerName} freezed.");
+            // Console.WriteLine($"[Freefrag] DEBUG: Bot {bot.PlayerName} freezed.");
 
             // bot.PlayerPawn.Value.MoveType = MoveType_t.MOVETYPE_OBSOLETE;
             bot.PlayerPawn.Value.MoveType = MoveType_t.MOVETYPE_VPHYSICS;
@@ -1227,7 +1227,7 @@ public class OpenPrefirePrac : BasePlugin
         if (player == null || !player.PawnIsAlive || player.Pawn.Value == null || hp < 0)
             return;
         
-        // Console.WriteLine($"[OpenPrefirePrac] DEBUG: Setup player {player.PlayerName} with health.");
+        // Console.WriteLine($"[Freefrag] DEBUG: Setup player {player.PlayerName} with health.");
 
         if (hp > 100)
             player.Pawn.Value.MaxHealth = hp;
@@ -1262,7 +1262,7 @@ public class OpenPrefirePrac : BasePlugin
 
         if (practiceNo < 0 || practiceNo >= _practices.Count)
         {
-            Console.WriteLine($"[OpenPrefirePrac] Error when creating guiding line. Current practice_no illegal. (practice_no = {practiceNo})");
+            Console.WriteLine($"[Freefrag] Error when creating guiding line. Current practice_no illegal. (practice_no = {practiceNo})");
             return;
         }
 
@@ -1289,7 +1289,7 @@ public class OpenPrefirePrac : BasePlugin
 
             if (beam == null || !beam.IsValid)
             {
-                Console.WriteLine($"[OpenPrefirePrac] Error when deleting guiding line. Failed to get beam entity(index = {_playerStatuses[playerSlot].Beams[i]})");
+                Console.WriteLine($"[Freefrag] Error when deleting guiding line. Failed to get beam entity(index = {_playerStatuses[playerSlot].Beams[i]})");
                 continue;
             }
 
@@ -1310,7 +1310,7 @@ public class OpenPrefirePrac : BasePlugin
         if (beam == null)
         {
             // Failed to create beam
-            Console.WriteLine($"[OpenPrefirePrac] Failed to create beam. Start position: {startPos}, end position: {endPos}");
+            Console.WriteLine($"[Freefrag] Failed to create beam. Start position: {startPos}, end position: {endPos}");
             return -1;
         }
 
@@ -1321,7 +1321,7 @@ public class OpenPrefirePrac : BasePlugin
         beam.EndPos.Add(endPos);
         beam.DispatchSpawn();
 
-        // Console.WriteLine($"[OpenPrefirePrac] Created a beam. Start position: {startPos}, end position: {endPos}, entity index: {beam.Index}");
+        // Console.WriteLine($"[Freefrag] Created a beam. Start position: {startPos}, end position: {endPos}, entity index: {beam.Index}");
         return (int)beam.Index;
     }
 
@@ -1492,7 +1492,7 @@ public class OpenPrefirePrac : BasePlugin
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[OpenPrefirePrac] Failed to save guiding line to {path}: {ex.Message}");
+            Console.WriteLine($"[Freefrag] Failed to save guiding line to {path}: {ex.Message}");
             player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.Red}{_translator!.Translate(player, "record.save_failed")}");
             return;
         }
@@ -1503,7 +1503,7 @@ public class OpenPrefirePrac : BasePlugin
         DeleteGuidingLine(slot);
         CreateGuidingLine(slot);
 
-        Console.WriteLine($"[OpenPrefirePrac] Saved {count}-point guiding line for {_mapName}/{practice.PracticeName} to {path}");
+        Console.WriteLine($"[Freefrag] Saved {count}-point guiding line for {_mapName}/{practice.PracticeName} to {path}");
         player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "record.saved", count, practice.PracticeName)}");
     }
 
@@ -1517,13 +1517,13 @@ public class OpenPrefirePrac : BasePlugin
 
     /// <summary>
     /// Path of a bundled behavior tree relative to game/csgo, derived from where the plugin actually lives
-    /// (plugins/disabled/OpenPrefirePrac on kus/cs2-modded-server) instead of a hardcoded plugins/OpenPrefirePrac.
+    /// (plugins/disabled/Freefrag on kus/cs2-modded-server) instead of a hardcoded path.
     /// </summary>
     private string BehaviorTreePath(string file)
     {
         var dir = ModuleDirectory.Replace('\\', '/');
         var idx = dir.IndexOf("/addons/", StringComparison.OrdinalIgnoreCase);
-        var rel = idx >= 0 ? dir[(idx + 1)..] : "addons/counterstrikesharp/plugins/OpenPrefirePrac";
+        var rel = idx >= 0 ? dir[(idx + 1)..] : "addons/counterstrikesharp/plugins/disabled/Freefrag";
         return $"{rel}/resources/bt/{file}".Replace('/', '\\');
     }
 
@@ -1584,7 +1584,7 @@ public class OpenPrefirePrac : BasePlugin
                 {
                     var value = tmpConvar.GetPrimitiveValue<bool>();
                     _serverStatus.BoolConvars.Add(convarName, value);
-                    // Console.WriteLine($"[OpenPrefirePrac] {convarName}: {value}");
+                    // Console.WriteLine($"[Freefrag] {convarName}: {value}");
                 }
             }
 
@@ -1596,7 +1596,7 @@ public class OpenPrefirePrac : BasePlugin
                 {
                     var value = tmpConvar.GetPrimitiveValue<int>();
                     _serverStatus.IntConvars.Add(convarName, value);
-                    // Console.WriteLine($"[OpenPrefirePrac] {convarName}: {value}");
+                    // Console.WriteLine($"[Freefrag] {convarName}: {value}");
                 }
             }
 
@@ -1608,7 +1608,7 @@ public class OpenPrefirePrac : BasePlugin
                 {
                     var value = tmpConvar.GetPrimitiveValue<float>();
                     _serverStatus.FloatConvars.Add(convarName, value);
-                    // Console.WriteLine($"[OpenPrefirePrac] {convarName}: {value}");
+                    // Console.WriteLine($"[Freefrag] {convarName}: {value}");
                 }
             }
 
@@ -1620,13 +1620,13 @@ public class OpenPrefirePrac : BasePlugin
                 {
                     var value = tmpConvar.StringValue;
                     _serverStatus.StringConvars.Add(convarName, value);
-                    // Console.WriteLine($"[OpenPrefirePrac] DEBUG {convarName}: {value}");
+                    // Console.WriteLine($"[Freefrag] DEBUG {convarName}: {value}");
                 }
             }
         }
         catch (System.Exception)
         {
-            Console.WriteLine("[OpenPrefirePrac] Error reading convars.");
+            Console.WriteLine("[Freefrag] Error reading convars.");
             throw;
         }
 
@@ -1638,14 +1638,14 @@ public class OpenPrefirePrac : BasePlugin
                 _serverGameRules = Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules").First().GameRules!;
             }
             _serverStatus.WarmupStatus = _serverGameRules.WarmupPeriod;
-            // Console.WriteLine($"[OpenPrefirePrac] Warmup Status: {_serverGameRules.WarmupPeriod}");
+            // Console.WriteLine($"[Freefrag] Warmup Status: {_serverGameRules.WarmupPeriod}");
         }
         catch (System.Exception)
         {
-            Console.WriteLine($"[OpenPrefirePrac] Can't read server's warmup status, will use the default value {_serverStatus.WarmupStatus}.");
+            Console.WriteLine($"[Freefrag] Can't read server's warmup status, will use the default value {_serverStatus.WarmupStatus}.");
         }
 
-        Console.WriteLine("[OpenPrefirePrac] Values of convars saved.");
+        Console.WriteLine("[Freefrag] Values of convars saved.");
     }
 
     private void RestoreConvars()
@@ -1701,7 +1701,7 @@ public class OpenPrefirePrac : BasePlugin
             Server.ExecuteCommand("mp_warmup_end");
         }
 
-        Console.WriteLine("[OpenPrefirePrac] Values of convars restored.");
+        Console.WriteLine("[Freefrag] Values of convars restored.");
     }
 
     private void SetupConvars()
@@ -1786,7 +1786,7 @@ public class OpenPrefirePrac : BasePlugin
         // Server.ExecuteCommand("mp_respawn_on_death_ct 1");
         // Server.ExecuteCommand("mp_respawn_on_death_t 1");
 
-        Console.WriteLine("[OpenPrefirePrac] Values of convars set.");
+        Console.WriteLine("[Freefrag] Values of convars set.");
     }
 
     private void RefillAmmo(CCSPlayerController player)
@@ -1996,7 +1996,7 @@ public class OpenPrefirePrac : BasePlugin
             UnregisterCommand();
         }
 
-        _command = new CommandDefinition("css_freefrag", "Command to bring up the main menu of OpenPrefirePrac.", (player, commandInfo) => {
+        _command = new CommandDefinition("css_freefrag", "Command to bring up the main menu of Klitch's Freefrag.", (player, commandInfo) => {
             // This is a client only command
             if (player == null)
             {
@@ -2497,7 +2497,7 @@ public class OpenPrefirePrac : BasePlugin
     {
         if (_hookErrorsLogged.Add($"{hookName}:{e.GetType().Name}"))
         {
-            Console.WriteLine($"[OpenPrefirePrac] Error in {hookName} (further errors of this type are not logged): {e}");
+            Console.WriteLine($"[Freefrag] Error in {hookName} (further errors of this type are not logged): {e}");
         }
     }
 
@@ -2693,7 +2693,7 @@ public class OpenPrefirePrac : BasePlugin
         }
 
         Server.ExecuteCommand($"bot_kick {bot.PlayerName}");
-        Console.WriteLine($"[OpenPrefirePrac] Exec command: bot_kick {bot.PlayerName}");
+        Console.WriteLine($"[Freefrag] Exec command: bot_kick {bot.PlayerName}");
     }
 
     // Thanks to B3none
@@ -2703,11 +2703,11 @@ public class OpenPrefirePrac : BasePlugin
         // Enable this feature only on nuke and mirage. (mirage is disabled because of the crash issue on Windows)
         if (Server.MapName != "de_nuke") // && Server.MapName != "de_mirage")
         {
-            Console.WriteLine($"[OpenPrefirePrac] Map {Server.MapName} doesn't have breakables to break.");
+            Console.WriteLine($"[Freefrag] Map {Server.MapName} doesn't have breakables to break.");
             return;
         }
 
-        Console.WriteLine($"[OpenPrefirePrac] Map {Server.MapName} have breakables to break.");
+        Console.WriteLine($"[Freefrag] Map {Server.MapName} have breakables to break.");
 
         // Enable certain breakables on certain maps to avoid game crash
         List<string> enabled_breakables =
@@ -2730,7 +2730,7 @@ public class OpenPrefirePrac : BasePlugin
             enabled_breakables.Add("prop_dynamic");
         }
 
-        // Console.WriteLine($"[OpenPrefirePrac] DEBUG: Have breakables: {enabled_breakables}");
+        // Console.WriteLine($"[Freefrag] DEBUG: Have breakables: {enabled_breakables}");
 
         // Loop to find breakables
         CEntityIdentity ?pEntity = new CEntityIdentity(EntitySystem.FirstActiveEntity);

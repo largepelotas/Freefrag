@@ -1,7 +1,7 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
 public sealed class ScoreRepository
 {

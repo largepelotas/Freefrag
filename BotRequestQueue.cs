@@ -1,4 +1,4 @@
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
 /// <summary>
 /// Serializes bot requests from several practicing players. Only the request at the head of the

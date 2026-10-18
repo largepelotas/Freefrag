@@ -1,6 +1,6 @@
 using CounterStrikeSharp.API.Core;
 
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
 public class PlayerStatus
 {

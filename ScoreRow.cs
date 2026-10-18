@@ -1,4 +1,4 @@
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
 public sealed record ScoreRow(
     long Id, ulong SteamId, string PlayerName, string Map, string Route,

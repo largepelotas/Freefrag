@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
 public static class ScoreFormat
 {
