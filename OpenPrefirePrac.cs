@@ -17,7 +17,7 @@ namespace OpenPrefirePrac;
 public class OpenPrefirePrac : BasePlugin
 {
     public override string ModuleName => "Open Prefire Prac";
-    public override string ModuleVersion => "0.1.50";
+    public override string ModuleVersion => "0.1.51";
     public override string ModuleAuthor => "Lengran";
     public override string ModuleDescription => "A plugin for practicing prefire in CS2. https://github.com/largepelotas/OpenPrefirePrac (fork of lengran/OpenPrefirePrac)";
 
@@ -86,18 +86,19 @@ public class OpenPrefirePrac : BasePlugin
 
             // // Setup map (20250109: Moved outside of the hotReload block)
             // OnMapStartHandler(Server.MapName);
-            
-            // Setup players
-            var players = Utilities.GetPlayers();
-            foreach (var tempPlayer in players)
-            {
-                if (tempPlayer == null || tempPlayer.IsBot || tempPlayer.IsHLTV)
-                {
-                    continue;
-                }
+        }
 
-                OnClientPutInServerHandler(tempPlayer.Slot);    
+        // Register players already on the server. This used to run only on hotReload, so a manual
+        // unload-then-load left connected players without a status entry and every !prefire command
+        // threw KeyNotFoundException until they reconnected.
+        foreach (var tempPlayer in Utilities.GetPlayers())
+        {
+            if (tempPlayer == null || !tempPlayer.IsValid || tempPlayer.IsBot || tempPlayer.IsHLTV)
+            {
+                continue;
             }
+
+            OnClientPutInServerHandler(tempPlayer.Slot);
         }
 
         // Setup map and practice routes
@@ -203,7 +204,9 @@ public class OpenPrefirePrac : BasePlugin
         }
         else
         {
-            // For players:
+            // For players (idempotent: Load() also calls this for players already connected):
+            if (_playerStatuses.ContainsKey(slot))
+                return;
             _playerStatuses.Add(slot, new PlayerStatus(_defaultPlayerSettings!));
 
             // Record player language
