@@ -7,7 +7,7 @@
 # Usage: scripts/pull-routes.sh           then review `git diff maps/` and commit.
 set -euo pipefail
 HOST=${CS2_HOST:-quinn@192.168.4.20}
-REL=addons/counterstrikesharp/plugins/disabled/Freefrag/maps
+REL=addons/counterstrikesharp/plugins/Freefrag/maps
 cd "$(dirname "$0")/.."
 
 ssh "$HOST" "mkdir -p ~/cs2/custom_files/$REL && cp -r ~/cs2/install/game/csgo/$REL/. ~/cs2/custom_files/$REL/ && tar czf - -C ~/cs2/install/game/csgo/$REL ." \

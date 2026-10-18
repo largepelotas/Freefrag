@@ -9,13 +9,19 @@
 # Files go to custom_files (merged over the install on every container start, so they survive updates)
 # and to the live install path, then the plugin is hot-reloaded over RCON.
 #
-# kus's cfg/prefire.cfg and cfg/unload_plugins.cfg name the plugin by its old OpenPrefirePrac path and
-# "Open Prefire Prac" module name. Every deploy rewrites the install's copies to the Freefrag names and
-# stores them in custom_files/cfg, so the override survives kus updates (and masks upstream edits to them).
+# Layout: Freefrag lives in plugins/Freefrag (not plugins/disabled), so CounterStrikeSharp auto-loads it once at
+# server start, like GameModeManager. It is never unloaded by unload_plugins.cfg and no cfg loads it. Instead the
+# plugin stays loaded in every game mode and is dormant outside Prefire. The mode cfgs tell it which mode is
+# running with the console command css_freefrag_mode:
+#   prefire.cfg         kus's `css_plugins load ".../OpenPrefirePrac.dll"` line becomes `css_freefrag_mode Prefire`
+#   unload_plugins.cfg  kus's `css_plugins unload "Open Prefire Prac"` line becomes `css_freefrag_mode none`
+# Every deploy rewrites the install's copies of both cfgs (from the kus original or from any earlier rewrite)
+# and stores them in custom_files/cfg, so the override survives kus updates (and masks upstream edits to them).
+# A load line must never come back: css_plugins load has no duplicate check and would start a second instance.
 #
-# The first deploy after the rename moves plugins/disabled/OpenPrefirePrac to plugins/disabled/Freefrag,
-# carrying scores.db, default_cfg.json, recorded routes and resources across. It needs a reload, so it
-# refuses to run while humans are connected unless FORCE_RELOAD=1.
+# The first deploy after the move relocates plugins/disabled/Freefrag (or the older plugins/disabled/OpenPrefirePrac)
+# to plugins/Freefrag, carrying scores.db, default_cfg.json, recorded routes and resources across. It needs a
+# reload, so it refuses to run while humans are connected unless FORCE_RELOAD=1.
 #
 # Usage: scripts/deploy.sh [--no-reload]      FORCE_RELOAD=1 reloads even with players connected
 set -euo pipefail
@@ -28,8 +34,8 @@ RELOAD=$1
 FORCE_RELOAD=$2
 OUT=~/cs2/build/Freefrag/out
 SRC=~/cs2/build/Freefrag
-REL=addons/counterstrikesharp/plugins/disabled/Freefrag
-OLD_REL=addons/counterstrikesharp/plugins/disabled/OpenPrefirePrac
+REL=addons/counterstrikesharp/plugins/Freefrag
+OLD_RELS="addons/counterstrikesharp/plugins/disabled/Freefrag addons/counterstrikesharp/plugins/disabled/OpenPrefirePrac"
 CUSTOM=~/cs2/custom_files/$REL
 LIVE=~/cs2/install/game/csgo/$REL
 
@@ -38,7 +44,11 @@ LIVE=~/cs2/install/game/csgo/$REL
 HUMANS=$(python3 ~/cs2/rcon.py status | grep -oE '[0-9]+ humans' | grep -oE '[0-9]+' || echo 0)
 
 MIGRATE=0
-[ -d ~/cs2/install/game/csgo/$OLD_REL ] && [ ! -d "$LIVE" ] && MIGRATE=1
+if [ ! -d "$LIVE" ]; then
+  for old in $OLD_RELS; do
+    if [ -d ~/cs2/install/game/csgo/$old ]; then MIGRATE=1; fi
+  done
+fi
 if [ "$MIGRATE" = 1 ]; then
   if [ "$RELOAD" = 0 ] || { [ "${HUMANS:-0}" != 0 ] && [ "$FORCE_RELOAD" != 1 ]; }; then
     echo "first Freefrag deploy moves the plugin folder and needs a reload; nothing changed."
@@ -48,21 +58,38 @@ if [ "$MIGRATE" = 1 ]; then
   python3 ~/cs2/rcon.py "say [Klitch's Freefrag] plugin reloading, your practice will reset in a moment" >/dev/null
   sleep 2
   # Unload first so scores.db is closed before its folder moves.
-  python3 ~/cs2/rcon.py 'css_plugins unload "Open Prefire Prac"' | tail -2
+  # Whichever module name is loaded (only one is); the other unload just reports "not found".
+  python3 ~/cs2/rcon.py 'css_plugins unload "Freefrag"' | tail -2 || true
+  python3 ~/cs2/rcon.py 'css_plugins unload "Open Prefire Prac"' | tail -2 || true
   for root in ~/cs2/install/game/csgo ~/cs2/custom_files; do
-    if [ -d "$root/$OLD_REL" ] && [ ! -d "$root/$REL" ]; then
-      mv "$root/$OLD_REL" "$root/$REL"
-      rm -f "$root/$REL"/OpenPrefirePrac.dll "$root/$REL"/OpenPrefirePrac.pdb "$root/$REL"/OpenPrefirePrac.deps.json
-      echo "moved $root/$OLD_REL -> Freefrag"
-    fi
+    for old in $OLD_RELS; do
+      if [ -d "$root/$old" ] && [ ! -d "$root/$REL" ]; then
+        mv "$root/$old" "$root/$REL"
+        rm -f "$root/$REL"/OpenPrefirePrac.dll "$root/$REL"/OpenPrefirePrac.pdb "$root/$REL"/OpenPrefirePrac.deps.json
+        echo "moved $root/$old -> $REL"
+      fi
+    done
   done
 fi
 
 mkdir -p ~/cs2/custom_files/cfg
+# Idempotent from the kus original or from any earlier rewrite: whole lines are replaced by the mode signal.
 for f in prefire.cfg unload_plugins.cfg; do
-  sed -e 's#plugins/disabled/OpenPrefirePrac/OpenPrefirePrac\.dll#plugins/disabled/Freefrag/Freefrag.dll#' \
-      -e 's#css_plugins unload "Open Prefire Prac"#css_plugins unload "Freefrag"#' \
+  case $f in
+    prefire.cfg)        SIGNAL='css_freefrag_mode Prefire' ;;
+    unload_plugins.cfg) SIGNAL='css_freefrag_mode none' ;;
+  esac
+  sed -E \
+      -e 's#^[[:space:]]*css_plugins[[:space:]]+load[[:space:]]+"?plugins/disabled/(OpenPrefirePrac/OpenPrefirePrac|Freefrag/Freefrag)\.dll"?.*$#css_freefrag_mode Prefire#' \
+      -e 's#^[[:space:]]*css_plugins[[:space:]]+unload[[:space:]]+"?(Open Prefire Prac|Freefrag)"?.*$#css_freefrag_mode none#' \
       ~/cs2/install/game/csgo/cfg/$f > ~/cs2/custom_files/cfg/$f.tmp
+  # The rewrite must leave no load/unload line behind and exactly one signal line of the right kind.
+  if grep -qE 'Freefrag\.dll|unload[[:space:]]+"?Freefrag' ~/cs2/custom_files/cfg/$f.tmp \
+     || [ "$(grep -c "^$SIGNAL" ~/cs2/custom_files/cfg/$f.tmp)" != 1 ]; then
+    echo "cfg/$f: rewrite failed (leftover Freefrag load/unload line, or not exactly one '$SIGNAL'); nothing installed."
+    rm -f ~/cs2/custom_files/cfg/$f.tmp
+    exit 1
+  fi
   mv ~/cs2/custom_files/cfg/$f.tmp ~/cs2/custom_files/cfg/$f
   cp ~/cs2/custom_files/cfg/$f ~/cs2/install/game/csgo/cfg/$f
 done
@@ -78,6 +105,9 @@ for dest in "$CUSTOM" "$LIVE"; do
   cp "$SRC"/lang/*.json "$dest/lang/"
   cp "$SRC"/resources/bt/*.kv3 "$dest/resources/bt/"                # hard_mode.kv3 points at this folder
 done
+# The nightly merge copies custom_files over the install, so a leftover disabled/Freefrag there would resurrect
+# a second copy of the plugin next to the real one.
+rm -rf ~/cs2/custom_files/addons/counterstrikesharp/plugins/disabled/Freefrag
 echo "deployed $(stat -c %y "$OUT/Freefrag.dll" | cut -d. -f1) build to custom_files and live install"
 
 if [ "$RELOAD" = 1 ]; then
@@ -92,7 +122,10 @@ if [ "$RELOAD" = 1 ]; then
     sleep 2
     python3 ~/cs2/rcon.py 'css_plugins unload "Freefrag"' | tail -2
   fi
-  python3 ~/cs2/rcon.py 'css_plugins load "plugins/disabled/Freefrag/Freefrag.dll"' | tail -4
+  python3 ~/cs2/rcon.py 'css_plugins load "plugins/Freefrag/Freefrag.dll"' | tail -4
+  # No `css_freefrag_mode Prefire` is sent here: the plugin reads the current mode from GameModeManager's API in
+  # Load(), so a hot reload during Prefire wakes up active, and in any other mode stays dormant. (rcon.py's
+  # css_currentmode output format was not verified, so it is deliberately not parsed.)
   sleep 2
   python3 ~/cs2/rcon.py 'css_plugins list' | grep -i freefrag || { echo "plugin did not load; check: docker logs cs2"; exit 1; }
 fi

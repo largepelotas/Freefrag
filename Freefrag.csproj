@@ -18,4 +18,13 @@
     <PackageReference Include="MaxMind.Db" Version="4.1.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.4" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- GameModeManager's shared API. CounterStrikeSharp resolves it from addons/counterstrikesharp/shared/ at runtime,
+         so it must never be copied next to the plugin. -->
+    <Reference Include="GameModeManager.Shared">
+      <HintPath>lib/GameModeManager.Shared.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
 </Project>

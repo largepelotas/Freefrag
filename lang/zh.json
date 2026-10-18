@@ -158,6 +158,8 @@
     "botarmormenu.title": "Bot armor",
     "countdownmenu.title": "Start countdown (seconds)",
     "mainmenu.gamemodes": "游戏模式",
+    "mainmenu.switch_prefire": "切换到 Prefire 模式",
+    "mode.dormant": "只有在 Prefire 模式下才能进行练习。请使用 !freefrag modes prefire 或菜单进行切换。",
     "gamemodesmenu.title": "游戏模式",
     "gamemodesmenu.confirm_title": "切换服务器到 {0}？",
     "gamemodesmenu.confirm_yes": "是，立即切换",

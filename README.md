@@ -324,3 +324,12 @@ into this repo.
 CounterStrikeSharp 1.0.3xx targets .NET 10. `scripts/build-on-server.sh` runs tests and
 `dotnet publish` inside the official SDK container on the game server, and
 `scripts/deploy.sh` copies the plugin files into the install and hot-reloads it.
+
+On a kus/cs2-modded-server install the plugin lives in `plugins/Freefrag` and loads once at
+server start, so it stays loaded in every game mode and is dormant outside Prefire: practice
+commands answer with a pointer to Prefire, and the main menu shrinks to the game modes list
+and a "Switch to Prefire mode" shortcut. The mode cfgs tell it which mode is running through
+the console command `css_freefrag_mode <mode|none>`: `deploy.sh` replaces the plugin load line
+in `prefire.cfg` with `css_freefrag_mode Prefire` and the unload line in `unload_plugins.cfg`
+with `css_freefrag_mode none`. It also reads the current mode from GameModeManager's API at
+load and at every map start, so a hot reload during Prefire wakes it up without a cfg.

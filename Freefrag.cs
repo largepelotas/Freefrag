@@ -1,6 +1,7 @@
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
+using CounterStrikeSharp.API.Core.Capabilities;
 using CounterStrikeSharp.API.Modules.Admin;
 using CounterStrikeSharp.API.Modules.Commands;
 using CounterStrikeSharp.API.Modules.Menu;
@@ -62,7 +63,11 @@ public class Freefrag : BasePlugin
     private int _glowCount;                                         // Bots currently wearing an x-ray glow; lets CheckTransmit skip all work when zero.
 
     private readonly HashSet<string> _hookErrorsLogged = new();     // Error types already reported from engine hooks.
-    
+
+    private readonly ModeGate _modeGate = new();                    // Active only while the server is in Prefire mode; dormant otherwise.
+
+    private bool _modeApiFailureLogged;                             // The GameModeManager API read failed once already; stay quiet after that.
+
     public override void Load(bool hotReload)
     {
         _playerCount = 0;
@@ -147,12 +152,131 @@ public class Freefrag : BasePlugin
 
         RegisterCommand();
 
+        // The mode cfgs tell us which mode the server is in (console only); the sender is never a player.
+        AddCommand("css_freefrag_mode", "Freefrag: set the active game mode (sent by the mode cfgs); 'none' = dormant", (player, commandInfo) =>
+        {
+            if (player != null)
+            {
+                return;
+            }
+
+            ApplyModeSignal(ModeGate.ParseSignal(commandInfo.ArgCount > 1 ? commandInfo.ArgByIndex(1) : null), "cfg");
+        });
+
+        // Freefrag loads before GameModeManager at server start, so this read may come back empty; the cfg signal
+        // and the next map start fill it in. On a hot reload during Prefire it finds the mode right away.
+        ApplyModeSignal(ReadGameModeManagerMode(), "GameModeManager");
+
         if (_timerBroadcastProgress == null)
         {
             _timerBroadcastProgress = AddTimer(3f, () => PrintProgress(), TimerFlags.REPEAT);
         }
 
         Console.WriteLine("[Freefrag] Plugin has been loaded. If the plugin is neither loaded along with server startup, nor reloaded on the fly, please reload it once to make it fully functional.");
+        Console.WriteLine($"[Freefrag] mode: {_modeGate.CurrentMode ?? "unknown"} -> {(_modeGate.Active ? "active" : "dormant")}");
+    }
+
+    /// <summary>
+    /// GameModeManager's current mode name, or null when it cannot be read (not loaded yet, API capability missing,
+    /// shared assembly missing). Never throws.
+    /// </summary>
+    private string? ReadGameModeManagerMode()
+    {
+        try
+        {
+            var api = new PluginCapability<GameModeManager.Shared.IGameModeApi>("game_mode:api").Get();
+            return api?.State?.CurrentMode?.Name;
+        }
+        catch (Exception e)
+        {
+            if (!_modeApiFailureLogged)
+            {
+                _modeApiFailureLogged = true;
+                Console.WriteLine($"[Freefrag] GameModeManager mode API unavailable ({e.GetType().Name}); relying on the mode cfg signal.");
+            }
+            return null;
+        }
+    }
+
+    /// <summary>Feeds a mode name to the gate and reacts when Freefrag wakes up or goes dormant.</summary>
+    private void ApplyModeSignal(string? modeName, string source)
+    {
+        var transition = _modeGate.Apply(modeName);
+        if (transition == ModeTransition.None)
+        {
+            return;
+        }
+
+        Console.WriteLine($"[Freefrag] Mode {modeName ?? "none"} from {source}: Freefrag is now {(transition == ModeTransition.Activated ? "active" : "dormant")}.");
+        if (transition == ModeTransition.Deactivated)
+        {
+            EnterDormant();
+        }
+    }
+
+    /// <summary>
+    /// The server left Prefire: stop every practice through the normal exit path (kicks the bots and, with the last
+    /// practicing player, restores the convars), cancel countdowns and close the menus, whose contents change.
+    /// Must never call SaveConvars: originals are only ever captured inside Prefire.
+    /// </summary>
+    private void EnterDormant()
+    {
+        foreach (var slot in _playerStatuses.Keys.ToList())
+        {
+            var status = _playerStatuses[slot];
+            var player = Utilities.GetPlayerFromSlot(slot);
+
+            if (status.PracticeIndex >= 0)
+            {
+                ExitPrefireMode(slot);
+                if (player != null && player.IsValid)
+                {
+                    player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "practice.exit")}");
+                }
+            }
+            else if (status.PendingRoute >= 0)
+            {
+                // Not practicing, so no convars were saved: only the pending route and countdown need clearing.
+                UnsetPrefireMode(slot);
+            }
+
+            CancelCountdown(slot);
+
+            if (player != null && player.IsValid && !player.IsBot)
+            {
+                // Silent close (CloseAllMenus would chat "menu closed" to everyone on the server).
+                if (UseScreenMenu())
+                {
+                    if (_screenMenu!.IsOpen(player))
+                    {
+                        _screenMenu.Close(player);
+                    }
+                }
+                else
+                {
+                    MenuManager.CloseActiveMenu(player);
+                }
+            }
+        }
+
+        if (_playerCount != 0)
+        {
+            // Should not happen: every practicing player was exited above.
+            Console.WriteLine($"[Freefrag] Warning: {_playerCount} practicing player(s) left after going dormant; resetting.");
+            _playerCount = 0;
+            foreach (var botSlot in _ownerOfBots.Keys.ToList())
+            {
+                KickBot(botSlot);
+            }
+            foreach (var status in _playerStatuses.Values)
+            {
+                status.Bots.Clear();
+                status.PracticeIndex = -1;
+                status.PendingRoute = -1;
+            }
+        }
+
+        _botRequests.Clear();
     }
 
     public override void Unload(bool hotReload)
@@ -219,7 +343,7 @@ public class Freefrag : BasePlugin
         if (player.IsBot)
         {
             // For bots: If someone is practicing and it's an unmanaged bot, add or kick the bot
-            if (_playerCount > 0 && !_ownerOfBots.ContainsKey(slot))
+            if (_modeGate.Active && _playerCount > 0 && !_ownerOfBots.ContainsKey(slot))
             {
                 // Only the active request's bots are being spawned, so this bot belongs to its owner
                 // unless the bot's team says otherwise (then it came from somewhere else).
@@ -321,11 +445,23 @@ public class Freefrag : BasePlugin
         {
             Console.WriteLine("[Freefrag] Failed to load practices on map " + _mapName);
         }
+
+        // A failed API read must never deactivate a mode the cfg already signalled, so only a real mode name counts.
+        var apiMode = ReadGameModeManagerMode();
+        if (apiMode != null)
+        {
+            ApplyModeSignal(apiMode, "map start");
+        }
     }
 
     [GameEventHandler]
     public HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo info)
     {
+        if (!_modeGate.Active)
+        {
+            return HookResult.Continue;
+        }
+
         var playerOrBot = @event.Userid;
         
         if (playerOrBot == null || !playerOrBot.IsValid|| playerOrBot.IsHLTV)
@@ -452,6 +588,11 @@ public class Freefrag : BasePlugin
     [GameEventHandler]
     public HookResult OnPlayerDeath(EventPlayerDeath @event, GameEventInfo info)
     {
+        if (!_modeGate.Active)
+        {
+            return HookResult.Continue;
+        }
+
         var playerOrBot = @event.Userid;
         
         if (playerOrBot == null || !playerOrBot.IsValid || playerOrBot.IsHLTV)
@@ -1057,6 +1198,11 @@ public class Freefrag : BasePlugin
 
     private void SetupPrefireMode(CCSPlayerController player, bool withCountdown = false)
     {
+        if (!_modeGate.Active)
+        {
+            return;
+        }
+
         var status = _playerStatuses[player.Slot];
         var practiceNo = status.PracticeIndex;
 
@@ -1111,6 +1257,11 @@ public class Freefrag : BasePlugin
 
     private void AddBot(CCSPlayerController player, int numberOfBots)
     {
+        if (!_modeGate.Active)
+        {
+            return;
+        }
+
         int botTeam;
         if (player.TeamNum == (byte)CsTeam.CounterTerrorist)
         {
@@ -1506,6 +1657,11 @@ public class Freefrag : BasePlugin
 
     private void StartRecording(CCSPlayerController player)
     {
+        if (!_modeGate.Active)
+        {
+            return;
+        }
+
         var slot = player.Slot;
         var status = _playerStatuses[slot];
         if (status.IsRecording)
@@ -1631,18 +1787,24 @@ public class Freefrag : BasePlugin
 
     /// <summary>
     /// Path of a bundled behavior tree relative to game/csgo, derived from where the plugin actually lives
-    /// (plugins/disabled/Freefrag on kus/cs2-modded-server) instead of a hardcoded path.
+    /// (plugins/Freefrag on kus/cs2-modded-server) instead of a hardcoded path.
     /// </summary>
     private string BehaviorTreePath(string file)
     {
         var dir = ModuleDirectory.Replace('\\', '/');
         var idx = dir.IndexOf("/addons/", StringComparison.OrdinalIgnoreCase);
-        var rel = idx >= 0 ? dir[(idx + 1)..] : "addons/counterstrikesharp/plugins/disabled/Freefrag";
+        var rel = idx >= 0 ? dir[(idx + 1)..] : "addons/counterstrikesharp/plugins/Freefrag";
         return $"{rel}/resources/bt/{file}".Replace('/', '\\');
     }
 
     private void SaveConvars()
     {
+        // Originals must only ever be captured inside Prefire; anywhere else they would be another mode's settings.
+        if (!_modeGate.Active)
+        {
+            return;
+        }
+
         string[] boolConvarNames = [
             "tv_enable",
             "bot_allow_grenades",
@@ -1820,6 +1982,12 @@ public class Freefrag : BasePlugin
 
     private void SetupConvars()
     {
+        // Same rule as SaveConvars: the practice tweaks must never be applied outside Prefire.
+        if (!_modeGate.Active)
+        {
+            return;
+        }
+
         Server.ExecuteCommand("tv_enable 0");
         // Server.ExecuteCommand("sv_cheats 1");
         Server.ExecuteCommand("bot_allow_grenades 0");
@@ -1964,6 +2132,12 @@ public class Freefrag : BasePlugin
 
     private void StartPractice(CCSPlayerController player, int practiceIndex)
     {
+        if (!_modeGate.Active)
+        {
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "mode.dormant")}");
+            return;
+        }
+
         if (_playerCount == 0)
         {
             SaveConvars();
@@ -2039,6 +2213,11 @@ public class Freefrag : BasePlugin
 
     private void ChangeMap(CCSPlayerController player, string mapName)
     {
+        if (!_modeGate.Active)
+        {
+            return;
+        }
+
         // Check if the map has practice routes
         if (!_availableMaps.Contains(mapName))
         {
@@ -2082,6 +2261,11 @@ public class Freefrag : BasePlugin
 
     private void ChangeTrainingMode(CCSPlayerController player, int trainingMode)
     {
+        if (!_modeGate.Active)
+        {
+            return;
+        }
+
         if (_playerStatuses[player.Slot].TrainingMode != trainingMode && _playerStatuses[player.Slot].PracticeIndex > -1)
         {
             _playerStatuses[player.Slot].Run.MarkDirty();
@@ -2119,6 +2303,14 @@ public class Freefrag : BasePlugin
             // This is a client only command
             if (player == null)
             {
+                return;
+            }
+
+            // Dormant outside Prefire: only the mode switcher and the read-only commands stay available.
+            if (!_modeGate.Active
+                && !ModeGate.AllowedWhileDormant(commandInfo.ArgCount > 1 ? commandInfo.ArgByIndex(1) : ""))
+            {
+                player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "mode.dormant")}");
                 return;
             }
 
@@ -2472,8 +2664,9 @@ public class Freefrag : BasePlugin
     }
 
     /// <summary>
-    /// Runs the mode's cfg, exactly as an admin would by rcon. Most modes unload this plugin, so the menu is
-    /// closed first and the command waits for the next frame.
+    /// Runs the mode's cfg, exactly as an admin would by rcon. The plugin stays loaded in every mode: the cfgs
+    /// signal the new mode (css_freefrag_mode) and Freefrag goes dormant outside Prefire. The menu is closed
+    /// first and the command waits for the next frame.
     /// </summary>
     private void SwitchGameMode(CCSPlayerController player, GameMode mode)
     {
@@ -2490,8 +2683,38 @@ public class Freefrag : BasePlugin
         Server.NextFrame(() => Server.ExecuteCommand(command));
     }
 
+    /// <summary>Outside Prefire only two entries make sense: the mode list and a shortcut back to Prefire.</summary>
+    private MenuSpec BuildDormantMainMenu(CCSPlayerController player)
+    {
+        var items = new List<MenuItem>
+        {
+            MenuItem.Opens(_translator!.Translate(player, "mainmenu.gamemodes"), () => BuildGameModesMenu(player)),
+            new MenuItem(_translator.Translate(player, "mainmenu.switch_prefire"), SwitchToPrefire),
+        };
+
+        return new MenuSpec(_translator.Translate(player, "mainmenu.title"), items, _translator.Translate(player, "mainmenu.shortcut_prompt"));
+    }
+
+    private void SwitchToPrefire(CCSPlayerController player)
+    {
+        var prefire = GameModeList.Find(LoadGameModes(), ModeGate.PrefireMode);
+        if (prefire == null)
+        {
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "gamemodesmenu.none")}");
+            CloseAllMenus(player);
+            return;
+        }
+
+        SwitchGameMode(player, prefire);
+    }
+
     private MenuSpec BuildMainMenu(CCSPlayerController player)
     {
+        if (!_modeGate.Active)
+        {
+            return BuildDormantMainMenu(player);
+        }
+
         var items = new List<MenuItem>();
 
         // 1 Practice menu
@@ -3015,6 +3238,11 @@ public class Freefrag : BasePlugin
 
     private HookResult OnTakeDamage(CBaseEntity entity, CTakeDamageInfo info)
     {
+        if (!_modeGate.Active)
+        {
+            return HookResult.Continue;
+        }
+
         try
         {
             var controller = ControllerOfPlayerPawn(info.Attacker.Value);

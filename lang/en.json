@@ -166,6 +166,8 @@
     "botarmormenu.title": "Bot armor",
     "countdownmenu.title": "Start countdown (seconds)",
     "mainmenu.gamemodes": "Game modes",
+    "mainmenu.switch_prefire": "Switch to Prefire mode",
+    "mode.dormant": "Practice is only available in Prefire mode. Use !freefrag modes prefire or the menu to switch.",
     "gamemodesmenu.title": "Game modes",
     "gamemodesmenu.confirm_title": "Switch server to {0}?",
     "gamemodesmenu.confirm_yes": "Yes, switch now",

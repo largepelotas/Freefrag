@@ -158,6 +158,8 @@
     "botarmormenu.title": "Bot armor",
     "countdownmenu.title": "Start countdown (seconds)",
     "mainmenu.gamemodes": "Modos de jogo",
+    "mainmenu.switch_prefire": "Mudar para o modo Prefire",
+    "mode.dormant": "O treino só está disponível no modo Prefire. Use !freefrag modes prefire ou o menu para mudar.",
     "gamemodesmenu.title": "Modos de jogo",
     "gamemodesmenu.confirm_title": "Mudar o servidor para {0}?",
     "gamemodesmenu.confirm_yes": "Sim, mudar agora",
