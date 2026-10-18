@@ -86,4 +86,189 @@ public class LandingWatchTests
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new LandingWatch(0, deadline));
     }
+
+    // Settle test: bots never report ground, so rest on the floor is detected from Z and vz.
+
+    [Fact]
+    public void SettlesAfterThreeStableTicksWithZeroVelocity()
+    {
+        var w = new LandingWatch(100, 32, settleTicks: 0);
+        Assert.Equal(LandingVerdict.Pending, w.Tick(100, 64.0f, 0f, false)); // seeds the previous Z
+        Assert.Equal(LandingVerdict.Pending, w.Tick(101, 64.0f, 0f, false)); // stable 1
+        Assert.Equal(LandingVerdict.Pending, w.Tick(102, 64.0f, 0f, false)); // stable 2
+        Assert.Equal(LandingVerdict.Landed, w.Tick(103, 64.0f, 0f, false));  // stable 3
+        Assert.Equal(LandingReason.Settled, w.Reason);
+    }
+
+    [Fact]
+    public void DoesNotSettleWhileZIsChanging()
+    {
+        var w = new LandingWatch(100, 32, settleTicks: 0);
+        float z = 80f;
+        for (int t = 100; t < 132; t++)
+        {
+            z -= 0.5f; // falling slowly but vz is reported as zero
+            Assert.Equal(LandingVerdict.Pending, w.Tick(t, z, 0f, false));
+        }
+    }
+
+    [Fact]
+    public void DoesNotSettleWhileVelocityIsNonZero()
+    {
+        var w = new LandingWatch(100, 32, settleTicks: 0);
+        for (int t = 100; t < 132; t++)
+            Assert.Equal(LandingVerdict.Pending, w.Tick(t, 64.0f, -3.0f, false));
+    }
+
+    [Fact]
+    public void VelocityWithinOneUnitPerSecondCountsAsStill()
+    {
+        var w = new LandingWatch(100, 32, settleTicks: 0);
+        w.Tick(100, 64.0f, 0.9f, false);
+        w.Tick(101, 64.0f, -0.9f, false);
+        w.Tick(102, 64.0f, 1.0f, false);
+        Assert.Equal(LandingVerdict.Landed, w.Tick(103, 64.0f, -1.0f, false));
+        Assert.Equal(LandingReason.Settled, w.Reason);
+    }
+
+    [Fact]
+    public void ZChangeBelowThresholdCountsAsStable()
+    {
+        var w = new LandingWatch(100, 32, settleTicks: 0);
+        w.Tick(100, 64.00f, 0f, false);
+        w.Tick(101, 64.04f, 0f, false);
+        w.Tick(102, 64.00f, 0f, false);
+        Assert.Equal(LandingVerdict.Landed, w.Tick(103, 64.04f, 0f, false));
+    }
+
+    [Fact]
+    public void ZChangeAtThresholdIsNotStable()
+    {
+        var w = new LandingWatch(100, 32, settleTicks: 0);
+        w.Tick(100, 64.0f, 0f, false);
+        Assert.Equal(LandingVerdict.Pending, w.Tick(101, 64.0f + 0.06f, 0f, false));
+    }
+
+    [Fact]
+    public void MovementResetsTheStableCount()
+    {
+        var w = new LandingWatch(100, 32, settleTicks: 0);
+        w.Tick(100, 64.0f, 0f, false);
+        w.Tick(101, 64.0f, 0f, false); // stable 1
+        w.Tick(102, 64.0f, 0f, false); // stable 2
+        Assert.Equal(LandingVerdict.Pending, w.Tick(103, 63.0f, -50f, false)); // moves: reset
+        Assert.Equal(LandingVerdict.Pending, w.Tick(104, 63.0f, 0f, false));   // stable 1
+        Assert.Equal(LandingVerdict.Pending, w.Tick(105, 63.0f, 0f, false));   // stable 2
+        Assert.Equal(LandingVerdict.Landed, w.Tick(106, 63.0f, 0f, false));    // stable 3
+    }
+
+    [Fact]
+    public void SingleStableTickThenMovementResetsTheCount()
+    {
+        var w = new LandingWatch(100, 32, settleTicks: 0);
+        w.Tick(100, 64.0f, 0f, false);
+        w.Tick(101, 64.0f, 0f, false);   // stable 1
+        w.Tick(102, 60.0f, -80f, false); // reset
+        w.Tick(103, 60.0f, 0f, false);   // stable 1
+        Assert.Equal(LandingVerdict.Pending, w.Tick(104, 60.0f, 0f, false)); // stable 2 only
+    }
+
+    [Fact]
+    public void StillSamplesInsideSettleWindowDoNotCount()
+    {
+        // A pawn teleported with zero velocity looks motionless before gravity is applied.
+        var w = new LandingWatch(100, 32, settleTicks: 2);
+        Assert.Equal(LandingVerdict.Pending, w.Tick(100, 80.0f, 0f, false));
+        Assert.Equal(LandingVerdict.Pending, w.Tick(101, 80.0f, 0f, false));
+        Assert.Equal(LandingVerdict.Pending, w.Tick(102, 80.0f, 0f, false)); // stable 1
+        Assert.Equal(LandingVerdict.Pending, w.Tick(103, 80.0f, 0f, false)); // stable 2
+        Assert.Equal(LandingVerdict.Landed, w.Tick(104, 80.0f, 0f, false));  // stable 3
+    }
+
+    [Fact]
+    public void StableTickCountIsConfigurable()
+    {
+        var w = new LandingWatch(100, 32, settleTicks: 0, stableTicks: 1);
+        w.Tick(100, 64.0f, 0f, false);
+        Assert.Equal(LandingVerdict.Landed, w.Tick(101, 64.0f, 0f, false));
+    }
+
+    [Fact]
+    public void NonPositiveStableTicksThrows()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new LandingWatch(0, 32, 2, 0));
+    }
+
+    [Fact]
+    public void GroundFlagAcceptsImmediatelyWithMotionData()
+    {
+        var w = new LandingWatch(100, 32, settleTicks: 2);
+        Assert.Equal(LandingVerdict.Landed, w.Tick(102, 70.0f, -200f, true));
+        Assert.Equal(LandingReason.Ground, w.Reason);
+    }
+
+    [Fact]
+    public void GroundFlagInsideSettleWindowIsStillIgnoredWithMotionData()
+    {
+        var w = new LandingWatch(100, 32, settleTicks: 2);
+        Assert.Equal(LandingVerdict.Pending, w.Tick(101, 70.0f, 0f, true));
+        Assert.Equal(LandingReason.None, w.Reason);
+    }
+
+    [Fact]
+    public void GroundTakesPrecedenceOverSettledWhenBothHold()
+    {
+        var w = new LandingWatch(100, 32, settleTicks: 0, stableTicks: 1);
+        w.Tick(100, 64.0f, 0f, false);
+        Assert.Equal(LandingVerdict.Landed, w.Tick(101, 64.0f, 0f, true));
+        Assert.Equal(LandingReason.Ground, w.Reason);
+    }
+
+    [Fact]
+    public void TimeoutStillFiresAtDeadlineAndReportsTimeout()
+    {
+        var w = new LandingWatch(100, 32);
+        float z = 200f;
+        for (int t = 100; t < 132; t++)
+        {
+            z -= 5f;
+            Assert.Equal(LandingVerdict.Pending, w.Tick(t, z, -300f, false));
+            Assert.Equal(LandingReason.None, w.Reason);
+        }
+        Assert.Equal(LandingVerdict.TimedOut, w.Tick(132, z - 5f, -300f, false));
+        Assert.Equal(LandingReason.Timeout, w.Reason);
+    }
+
+    [Fact]
+    public void SettlingOnTheDeadlineTickBeatsTimeout()
+    {
+        var w = new LandingWatch(100, 32, settleTicks: 0);
+        w.Tick(129, 64.0f, 0f, false);
+        w.Tick(130, 64.0f, 0f, false);
+        w.Tick(131, 64.0f, 0f, false);
+        Assert.Equal(LandingVerdict.Landed, w.Tick(132, 64.0f, 0f, false));
+        Assert.Equal(LandingReason.Settled, w.Reason);
+    }
+
+    [Fact]
+    public void GroundOnlyTickNeverSettlesAndTimesOut()
+    {
+        var w = new LandingWatch(100, 32);
+        for (int t = 100; t < 132; t++)
+            Assert.Equal(LandingVerdict.Pending, w.Tick(false, t));
+        Assert.Equal(LandingVerdict.TimedOut, w.Tick(false, 132));
+        Assert.Equal(LandingReason.Timeout, w.Reason);
+    }
+
+    [Fact]
+    public void ReasonIsNoneWhilePendingAndStickyAfterwards()
+    {
+        var w = new LandingWatch(100, 32, settleTicks: 0, stableTicks: 1);
+        Assert.Equal(LandingReason.None, w.Reason);
+        w.Tick(100, 64.0f, 0f, false);
+        w.Tick(101, 64.0f, 0f, false);
+        Assert.Equal(LandingReason.Settled, w.Reason);
+        w.Tick(500, 0f, -999f, true);
+        Assert.Equal(LandingReason.Settled, w.Reason);
+    }
 }

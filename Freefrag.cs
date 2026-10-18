@@ -49,6 +49,7 @@ public class Freefrag : BasePlugin
 
     private readonly BotRequestQueue _botRequests = new();        // One player's bots spawn at a time; see BotRequestQueue.
     private readonly Dictionary<int, LandingWatch> _landingWatches = new();   // Key: bot slot. Bots waiting to touch ground before FreezeBot.
+    private readonly HashSet<int> _landingTimeoutLogged = new();              // Owner slots whose current route start already logged a landing timeout.
     private const uint FL_ONGROUND = 1u << 0;
 
     private const float BotSpawnInterval = 0.1f;
@@ -628,6 +629,7 @@ public class Freefrag : BasePlugin
                 {
                     // If there are more targets to place, move bot to next place
                     _playerStatuses[ownerSlot].Progress++;
+                    if (targetNo == 0) _landingTimeoutLogged.Remove(ownerSlot); // new route start: allow one timeout diagnostic again
                     // Console.WriteLine($"[Freefrag] DEBUG: Update progress to {_playerStatuses[owner].Progress}.");
 
                     var target = _practices[practiceIndex].Targets[_playerStatuses[ownerSlot].EnabledTargets[targetNo]];
@@ -3806,19 +3808,32 @@ public class Freefrag : BasePlugin
                 }
 
                 var watchedPawn = watchedBot.PlayerPawn.Value;
-                bool grounded = (watchedPawn.Flags & FL_ONGROUND) != 0 || (watchedPawn.GroundEntity?.IsValid ?? false);
+                float originZ = watchedPawn.AbsOrigin?.Z ?? float.NaN;
+                float velocityZ = watchedPawn.AbsVelocity?.Z ?? float.NaN;
+                // Bots never set FL_ONGROUND or a GroundEntity on the live server, so the watch's settle test
+                // (Z and vz at rest) is the signal that actually fires. API check (CounterStrikeSharp 1.0.376):
+                // CBaseEntity exposes GroundEntity (m_hGroundEntity) and CCSPlayerPawn exposes OnGroundLastTick
+                // (m_bOnGroundLastTick, previous-tick ground state, cheap bool). CChicken.IsOnGround and
+                // CCSPlayerAnimationState.WasOnGroundLastUpdate are not reachable from the pawn. OnGroundLastTick
+                // is untested on bots, so it only counts while the pawn is not falling; a stale true on an
+                // airborne bot cannot freeze it mid-air.
+                bool notFalling = velocityZ > -LandingWatch.VelocityEpsilon;
+                bool grounded = (watchedPawn.Flags & FL_ONGROUND) != 0
+                    || (watchedPawn.GroundEntity?.IsValid ?? false)
+                    || (watchedPawn.OnGroundLastTick && notFalling);
 
-                var verdict = watch.Tick(grounded, Server.TickCount);
+                var verdict = watch.Tick(Server.TickCount, originZ, velocityZ, grounded);
                 if (verdict == LandingVerdict.Pending)
                 {
                     continue;
                 }
 
                 _landingWatches.Remove(watchSlot);
-                if (verdict == LandingVerdict.TimedOut)
+                // Timeout is the diagnostic path: log it once per route start per owner, not once per bot.
+                if (watch.Reason == LandingReason.Timeout
+                    && (!_ownerOfBots.TryGetValue(watchSlot, out var watchOwner) || _landingTimeoutLogged.Add(watchOwner)))
                 {
-                    var originZ = watchedPawn.AbsOrigin?.Z;
-                    var zDelta = originZ.HasValue ? (originZ.Value - watch.TargetZ).ToString("F2") : "?";
+                    var zDelta = float.IsNaN(originZ) ? "?" : (originZ - watch.TargetZ).ToString("F2");
                     Console.WriteLine($"[Freefrag] Bot {watchedBot.PlayerName} never reported ground contact within {LandingWatch.DefaultDeadlineTicks} ticks, freezing anyway (pawn flags {watchedPawn.Flags}, move type {watchedPawn.MoveType}, groundEntity valid {watchedPawn.GroundEntity?.IsValid ?? false}, Z delta to target {zDelta}).");
                 }
                 FreezeBot(watchedBot);
