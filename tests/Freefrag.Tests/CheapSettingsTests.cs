@@ -122,4 +122,19 @@ public class CheapSettingsTests
         Assert.Equal(100, plain.BotArmor);
         Assert.Equal(3, plain.Countdown);
     }
+
+    // Prevents: a stray SwingTrigger in default_cfg.json (0, 99, 9000) releasing swingers instantly or never.
+    [Fact]
+    public void SwingTriggerOutOfRangeKeepsDefault()
+    {
+        Assert.Equal(600, SwingTriggerSetting.Default);
+        Assert.False(SwingTriggerSetting.InRange(99));
+        Assert.True(SwingTriggerSetting.InRange(100));
+        Assert.True(SwingTriggerSetting.InRange(3000));
+        Assert.False(SwingTriggerSetting.InRange(3001));
+        Assert.Equal(100f, SwingTriggerSetting.Clamp(50f));
+        Assert.Equal(3000f, SwingTriggerSetting.Clamp(9000f));
+        Assert.Equal(450f, SwingTriggerSetting.Clamp(450f));
+        Assert.Equal(SwingTriggerSetting.Default, new DefaultConfig().SwingTrigger);
+    }
 }

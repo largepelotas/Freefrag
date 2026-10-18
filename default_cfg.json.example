@@ -37,6 +37,8 @@
     "BotArmor": 100,
     // Seconds the player is held still before a route begins (0-5). 0 = no countdown.
     "Countdown": 3,
+    // Distance (100-3000 units) at which a swinging bot is released when its route line sets no trigger.
+    "SwingTrigger": 600,
     // Values that `!freefrag comp on` pins (and locks) so comp times are comparable.
     // Repeat: 0 = off, -1 = infinite, n = n repeats. Out-of-range values are ignored.
     "Comp": {

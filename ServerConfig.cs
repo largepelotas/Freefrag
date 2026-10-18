@@ -36,6 +36,11 @@ public class DefaultConfig
     public int Countdown { get; set; } = CountdownSetting.Default;
 
     /*
+     * Distance (100-3000 units) at which a swinging bot is released when its route line sets no trigger.
+    */
+    public int SwingTrigger { get; set; } = SwingTriggerSetting.Default;
+
+    /*
      * Values that `!freefrag comp on` pins. Every key is optional; out-of-range values are ignored.
     */
     public CompConfig Comp { get; set; } = new();
@@ -164,6 +169,11 @@ public class DefaultConfig
                     Countdown = jsonConfig.Countdown;
                 }
 
+                if (SwingTriggerSetting.InRange(jsonConfig.SwingTrigger))
+                {
+                    SwingTrigger = jsonConfig.SwingTrigger;
+                }
+
                 if (jsonConfig.Comp != null)
                 {
                     Comp.CopyValidFrom(jsonConfig.Comp);
@@ -199,7 +209,7 @@ public class DefaultConfig
                     EquipPlayer = jsonConfig.EquipPlayer;
                 }
 
-                Console.WriteLine($"[Freefrag] Using default settings: Difficulty = {Difficulty}, TrainingMode = {TrainingMode}, BotWeapon = {BotWeapon}, PlayerGun = {PlayerGun}, Jitter = {Jitter}, HeadshotOnly = {HeadshotOnly}, Xray = {Xray}, BotsFire = {BotsFire}, BotHealth = {BotHealth}, BotArmor = {BotArmor}, Countdown = {Countdown}, MenuType = {MenuType}, MenuRows = {MenuRows}, BotAimLock = {BotAimLock}, EquipPlayer = {EquipPlayer}");
+                Console.WriteLine($"[Freefrag] Using default settings: Difficulty = {Difficulty}, TrainingMode = {TrainingMode}, BotWeapon = {BotWeapon}, PlayerGun = {PlayerGun}, Jitter = {Jitter}, HeadshotOnly = {HeadshotOnly}, Xray = {Xray}, BotsFire = {BotsFire}, BotHealth = {BotHealth}, BotArmor = {BotArmor}, Countdown = {Countdown}, SwingTrigger = {SwingTrigger}, MenuType = {MenuType}, MenuRows = {MenuRows}, BotAimLock = {BotAimLock}, EquipPlayer = {EquipPlayer}");
             }
             catch (System.Exception)
             {

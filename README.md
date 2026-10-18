@@ -102,6 +102,8 @@ Explanation of values:
   - 0-100: Armor of spawned bots (default 100). 0 also removes the helmet.
 - Countdown:
   - 0-5: Seconds the player is held still before a route begins (default 3). 0 = no countdown.
+- SwingTrigger:
+  - 100-3000: Distance (units) at which a swinging bot is released when its route line sets no trigger (default 600).
 - Comp: the values `!freefrag comp on` applies, as an object with the keys BotsFire (0/1), BotHealth, BotArmor, Countdown, Repeat (0 = off, -1 = infinite, n) and Jitter. Out-of-range values are ignored. Defaults: BotsFire 1, BotHealth 100, BotArmor 100, Countdown 3, Repeat 0, Jitter 0.
 - MenuType:
   - 0: Chat menus (type !1-!9 to choose).
@@ -338,6 +340,40 @@ The same applies to bot positions: stand where a bot should be and place it, wit
    discards unsaved bots.
 
 Run `scripts/pull-routes.sh` afterwards, as above.
+
+## Swinging bots (this fork)
+
+A bot can hide at its spot and run to a second point, the peek point, once you get close. It
+runs along the nav mesh and fights from there. A target line gets an optional `peek` spec after
+the crouch flag:
+
+```text
+pos_x pos_y pos_z ang_x ang_y ang_z is_crouching peek px py pz [trigger d] [# comment]
+```
+
+For example `646.37 1180.62 0.84 -0.05 -90.55 0.0 False peek 700.0 1500.0 0.8 trigger 450`.
+The line's own position is the hiding spot; `peek` is where the bot runs to (feet coordinates);
+`trigger` (optional, 100-3000) is the distance from you to the hiding spot that releases it, and
+defaults to `SwingTrigger` from the config. A line without `peek` is a static bot, as before.
+A `peek` with fewer than three numbers makes the line a static bot and prints one warning in the
+server console.
+
+In game, from a started route:
+
+- `!freefrag addbot swing` places a swinger at your feet, facing your view: its hiding spot.
+- `!freefrag addbot peek` sets the peek point of the last draft swinger to where you stand. A
+  lime line shows the run from the hiding spot to the peek point.
+- `undo`, `clear` and `save` work as for other draft bots; `save` refuses while a draft swinger
+  has no peek point.
+
+A released bot runs toward you and is frozen at its peek point, so put the peek point on the
+path the bot takes out of cover (the corner's exit), reachable within 2 seconds.
+
+Bots only move on the nav mesh. A bot that never moves after being released is reported in the
+server console as `Route <name> target <n> ... never moved`.
+
+Limits of this first version: a swinger does not return to cover, and there is no choice of
+swing direction.
 
 ## Building (this fork)
 
