@@ -52,6 +52,17 @@ public class DefaultConfig
     public int MenuRows { get; set; } = 7;
 
     /*
+     * Path to GameModeManager.json, which the Game modes menu reads. Empty = look for
+     * configs/plugins/GameModeManager/GameModeManager.json in the folders above this plugin.
+    */
+    public string GameModesConfig { get; set; } = "";
+
+    /*
+     * Permission flag (e.g. "@css/changemap") needed to switch game modes from the menu. Empty = anyone may.
+    */
+    public string GameModesPermission { get; set; } = "";
+
+    /*
      * 0 = disabled.
      * 1 = css based aim lock.
      * 2 = behavior tree based aim lock (hard).
@@ -166,6 +177,16 @@ public class DefaultConfig
                 if (jsonConfig.MenuRows > 0 && jsonConfig.MenuRows < 9)
                 {
                     MenuRows = jsonConfig.MenuRows;
+                }
+
+                if (jsonConfig.GameModesConfig != null)
+                {
+                    GameModesConfig = jsonConfig.GameModesConfig.Trim();
+                }
+
+                if (jsonConfig.GameModesPermission != null)
+                {
+                    GameModesPermission = jsonConfig.GameModesPermission.Trim();
                 }
 
                 if (jsonConfig.BotAimLock > -1 && jsonConfig.BotAimLock < 3)

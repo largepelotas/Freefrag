@@ -164,5 +164,16 @@
     "moremenu.countdown": "Start countdown: {0}",
     "bothealthmenu.title": "Bot health",
     "botarmormenu.title": "Bot armor",
-    "countdownmenu.title": "Start countdown (seconds)"
+    "countdownmenu.title": "Start countdown (seconds)",
+    "mainmenu.gamemodes": "Game modes",
+    "gamemodesmenu.title": "Game modes",
+    "gamemodesmenu.confirm_title": "Switch server to {0}?",
+    "gamemodesmenu.confirm_yes": "Yes, switch now",
+    "gamemodesmenu.confirm_no": "No, go back",
+    "gamemodesmenu.none": "No game modes found (GameModeManager.json missing)",
+    "gamemodesmenu.denied": "You are not allowed to switch game modes",
+    "gamemodes.switching": "Switching the server to {0}...",
+    "gamemodes.unknown": "Unknown game mode: {0}",
+    "gamemodes.denied": "You are not allowed to switch game modes.",
+    "gamemodes.help": "[PURPLE]modes[NORMAL] [name]: List the server's game modes, or switch to one. Switching unloads Freefrag."
 }

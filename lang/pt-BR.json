@@ -156,5 +156,16 @@
     "moremenu.countdown": "Start countdown: {0}",
     "bothealthmenu.title": "Bot health",
     "botarmormenu.title": "Bot armor",
-    "countdownmenu.title": "Start countdown (seconds)"
+    "countdownmenu.title": "Start countdown (seconds)",
+    "mainmenu.gamemodes": "Modos de jogo",
+    "gamemodesmenu.title": "Modos de jogo",
+    "gamemodesmenu.confirm_title": "Mudar o servidor para {0}?",
+    "gamemodesmenu.confirm_yes": "Sim, mudar agora",
+    "gamemodesmenu.confirm_no": "Não, voltar",
+    "gamemodesmenu.none": "Nenhum modo de jogo encontrado (GameModeManager.json ausente)",
+    "gamemodesmenu.denied": "Você não tem permissão para mudar o modo de jogo",
+    "gamemodes.switching": "Mudando o servidor para {0}...",
+    "gamemodes.unknown": "Modo de jogo desconhecido: {0}",
+    "gamemodes.denied": "Você não tem permissão para mudar o modo de jogo.",
+    "gamemodes.help": "[PURPLE]modes[NORMAL] [nome]: Lista os modos de jogo do servidor ou muda para um deles. Mudar descarrega o Freefrag."
 }

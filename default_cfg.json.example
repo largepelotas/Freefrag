@@ -54,6 +54,10 @@
     "MenuType": 1,
     // Rows of a screen menu shown at once (1-8). Longer menus scroll.
     "MenuRows": 7,
+    // Game modes menu: path to GameModeManager.json. Empty = found automatically under configs/plugins/GameModeManager.
+    "GameModesConfig": "",
+    // Game modes menu: permission flag needed to switch modes (e.g. "@css/changemap"). Empty = anyone may switch.
+    "GameModesPermission": "",
     // Aim lock for bots:
     //   0: CS2's native bot behavior. It works in a consistant manner but is less powerful.
     //   1: CSS based aim lock: Bots always aim at players' heads. But this may conflict with CS2's native bot logic, causing bots to not react under certain circumstances.

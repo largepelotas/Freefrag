@@ -33,6 +33,7 @@ Send "**!freefrag**" in chatbox or use command "**css_freefrag**" in console. Th
 There are also some shortcut commands you can use.
 
   - !freefrag prac [number]: Start practicing on a selected route.
+  - !freefrag modes [name]: List the server's game modes in the menu, or switch straight to one (e.g. !freefrag modes prefire). Switching unloads Freefrag.
   - !freefrag map [map name]: Switch to another map.
   - !freefrag df [1-6]: Set the difficulty.
   - !freefrag mode [rand/full]: Set training mode.
@@ -107,6 +108,10 @@ Explanation of values:
   - 1: Screen menus (default), drawn in the centre of the screen. W/S move, D selects, A goes back, Tab closes. Arrow keys, Enter and Backspace work after a one-time bind; type `!freefrag binds` in chat for the line to paste into the console.
 - MenuRows:
   - 1-8: Height of a screen menu in rows (default 7). A menu longer than this scrolls, and two of the rows are then used for the "..." scroll markers above and below the entries (a 7-row setting shows 5 entries at a time).
+- GameModesConfig:
+  - Path to GameModeManager.json, which the Game modes menu reads (default empty: found automatically in configs/plugins/GameModeManager, up to four folders above the plugin).
+- GameModesPermission:
+  - A CounterStrikeSharp permission flag such as `@css/changemap` that a player needs to switch game modes (default empty: anyone may).
 
 For detailed discussion on bot difficulty, please refer to [this issue](https://github.com/lengran/OpenPrefirePrac/issues/17).
 
