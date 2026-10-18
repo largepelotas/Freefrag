@@ -12,9 +12,10 @@ set -euo pipefail
 HOST=${CS2_HOST:-quinn@192.168.4.20}
 RELOAD=1; [ "${1:-}" = "--no-reload" ] && RELOAD=0
 
-ssh "$HOST" bash -s "$RELOAD" <<'REMOTE_SCRIPT'
+ssh "$HOST" bash -s "$RELOAD" "${FORCE_RELOAD:-0}" <<'REMOTE_SCRIPT'
 set -euo pipefail
 RELOAD=$1
+FORCE_RELOAD=$2
 OUT=~/cs2/build/OpenPrefirePrac/out
 SRC=~/cs2/build/OpenPrefirePrac
 REL=addons/counterstrikesharp/plugins/disabled/OpenPrefirePrac
@@ -34,8 +35,8 @@ echo "deployed $(stat -c %y "$OUT/OpenPrefirePrac.dll" | cut -d. -f1) build to c
 if [ "$RELOAD" = 1 ]; then
   # A reload resets every active practice and, right after a build, is the main way players get
   # interrupted. Refuse while humans are connected unless FORCE_RELOAD=1.
-  HUMANS=$(python3 ~/cs2/rcon.py status | sed -n 's/.*players *: *\([0-9]*\) humans.*//p')
-  if [ "${HUMANS:-0}" != 0 ] && [ "${FORCE_RELOAD:-0}" != 1 ]; then
+  HUMANS=$(python3 ~/cs2/rcon.py status | grep -oE '[0-9]+ humans' | grep -oE '[0-9]+' || echo 0)
+  if [ "${HUMANS:-0}" != 0 ] && [ "$FORCE_RELOAD" != 1 ]; then
     echo "$HUMANS human(s) connected; files copied but NOT reloaded. Re-run with FORCE_RELOAD=1 to reload anyway, or wait for the nightly restart."
     exit 0
   fi
