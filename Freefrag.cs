@@ -9,6 +9,7 @@ using CounterStrikeSharp.API.Modules.Utils;
 using CounterStrikeSharp.API.Modules.Memory;
 using Vector = CounterStrikeSharp.API.Modules.Utils.Vector;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using CounterStrikeSharp.API.Modules.Cvars;
 using CounterStrikeSharp.API.Core.Commands;
 using CounterStrikeSharp.API.Modules.Timers;
@@ -193,14 +194,15 @@ public class Freefrag : BasePlugin
 
     /// <summary>
     /// GameModeManager's current mode name, or null when it cannot be read (not loaded yet, API capability missing,
-    /// shared assembly missing). Never throws.
+    /// shared assembly missing or mismatched). Never throws: the code that names the shared types lives in
+    /// <see cref="QueryGameModeManagerMode"/>, so a missing GameModeManager.Shared surfaces as a FileNotFound or
+    /// TypeLoad exception when that method is first compiled, inside the try below, not at this method's own call site.
     /// </summary>
     private string? ReadGameModeManagerMode()
     {
         try
         {
-            var api = new PluginCapability<GameModeManager.Shared.IGameModeApi>("game_mode:api").Get();
-            return api?.State?.CurrentMode?.Name;
+            return QueryGameModeManagerMode();
         }
         catch (Exception e)
         {
@@ -211,6 +213,13 @@ public class Freefrag : BasePlugin
             }
             return null;
         }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static string? QueryGameModeManagerMode()
+    {
+        var api = new PluginCapability<GameModeManager.Shared.IGameModeApi>("game_mode:api").Get();
+        return api?.State?.CurrentMode?.Name;
     }
 
     /// <summary>Feeds a mode name to the gate and reacts when Freefrag wakes up or goes dormant.</summary>
@@ -230,8 +239,10 @@ public class Freefrag : BasePlugin
     }
 
     /// <summary>
-    /// The server left Prefire: stop every practice through the normal exit path (kicks the bots and, with the last
-    /// practicing player, restores the convars), cancel countdowns and close the menus, whose contents change.
+    /// The server left Prefire: stop every practice through the normal exit path (kicks the bots), cancel countdowns
+    /// and close the menus, whose contents change. Convars are NOT restored: Server.ExecuteCommand only queues, and the
+    /// signal arrives mid-way through the new mode's cfg (unload_plugins.cfg), so a queued restore would run after the
+    /// rest of that cfg and overwrite the new mode's own settings. The saved originals are discarded instead.
     /// Must never call SaveConvars: originals are only ever captured inside Prefire.
     /// </summary>
     private void EnterDormant()
@@ -243,7 +254,7 @@ public class Freefrag : BasePlugin
 
             if (status.PracticeIndex >= 0)
             {
-                ExitPrefireMode(slot);
+                ExitPrefireMode(slot, restoreConvars: false);
                 if (player != null && player.IsValid)
                 {
                     player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "practice.exit")}");
@@ -279,6 +290,7 @@ public class Freefrag : BasePlugin
             // Should not happen: every practicing player was exited above.
             Console.WriteLine($"[Freefrag] Warning: {_playerCount} practicing player(s) left after going dormant; resetting.");
             _playerCount = 0;
+            DiscardSavedConvars();
             foreach (var botSlot in _ownerOfBots.Keys.ToList())
             {
                 KickBot(botSlot);
@@ -292,6 +304,17 @@ public class Freefrag : BasePlugin
         }
 
         _botRequests.Clear();
+        DiscardSavedConvars();
+    }
+
+    /// <summary>Forgets the saved originals without executing anything (see <see cref="EnterDormant"/>).</summary>
+    private void DiscardSavedConvars()
+    {
+        _serverStatus.WarmupStatus = false;
+        _serverStatus.BoolConvars.Clear();
+        _serverStatus.IntConvars.Clear();
+        _serverStatus.FloatConvars.Clear();
+        _serverStatus.StringConvars.Clear();
     }
 
     public override void Unload(bool hotReload)
@@ -1043,11 +1066,11 @@ public class Freefrag : BasePlugin
         }
     }
     
-    private void ExitPrefireMode(int playerSlot)
+    private void ExitPrefireMode(int playerSlot, bool restoreConvars = true)
     {
         UnsetPrefireMode(playerSlot);
 
-        if (_playerCount == 0)
+        if (restoreConvars && _playerCount == 0)
         {
             RestoreConvars();
         }
@@ -1227,21 +1250,24 @@ public class Freefrag : BasePlugin
         GenerateRandomPractice(player.Slot);
         ResetBots(player.Slot);
         
-        AddTimer(0.2f, () => MovePlayer(player, false, _practices[practiceNo].Player.Position, _practices[practiceNo].Player.Rotation));
+        // These timers outlive a mode switch or an exit: skip them once Freefrag is dormant or the player left the route.
+        bool StillPracticing() => _modeGate.Active && status.PracticeIndex >= 0;
+
+        AddTimer(0.2f, () => { if (StillPracticing()) MovePlayer(player, false, _practices[practiceNo].Player.Position, _practices[practiceNo].Player.Rotation); });
         if (withCountdown && status.Countdown > 0)
         {
             // Hold the player still once they are at the start spot; the route proper begins when they are released.
-            AddTimer(0.25f, () => StartCountdown(player, status));
+            AddTimer(0.25f, () => { if (StillPracticing()) StartCountdown(player, status); });
         }
-        AddTimer(0.3f, () => EquipPlayer(player));
-        AddTimer(0.35f, () => SetMoney(player, 60000));
+        AddTimer(0.3f, () => { if (StillPracticing()) EquipPlayer(player); });
+        AddTimer(0.35f, () => { if (StillPracticing()) SetMoney(player, 60000); });
         if (_playerStatuses[player.Slot].HealingMethod == 1 || _playerStatuses[player.Slot].HealingMethod == 5)
         {
-            AddTimer(0.4f, () => SetPlayerHealth(player, 500));
+            AddTimer(0.4f, () => { if (StillPracticing()) SetPlayerHealth(player, 500); });
         }
         else
         {
-            AddTimer(0.4f, () => SetPlayerHealth(player, 100));         // in case player got injured by bots before teleport
+            AddTimer(0.4f, () => { if (StillPracticing()) SetPlayerHealth(player, 100); });         // in case player got injured by bots before teleport
         }
     }
 
@@ -1305,6 +1331,11 @@ public class Freefrag : BasePlugin
     // bot that joins while this request is active is assigned to its owner in OnClientPutInServerHandler.
     private void IssueBotRequest(BotRequestQueue.Issue issue)
     {
+        if (!_modeGate.Active)
+        {
+            return;
+        }
+
         var joinTeam = issue.BotTeam == BotRequestQueue.TeamT ? "T" : "CT";
         var addCommand = issue.BotTeam == BotRequestQueue.TeamT ? "bot_add_t" : "bot_add_ct";
         Console.WriteLine($"[Freefrag] Creating {issue.Count} {joinTeam} bots for player slot {issue.OwnerSlot}.");
@@ -1312,6 +1343,11 @@ public class Freefrag : BasePlugin
         for (var i = 0; i < issue.Count; i++)
         {
             AddTimer(i * BotSpawnInterval, () => {
+                if (!_modeGate.Active)
+                {
+                    return;
+                }
+
                 Server.ExecuteCommand($"bot_join_team {joinTeam}");
                 Server.ExecuteCommand(addCommand);
             });
@@ -1319,6 +1355,11 @@ public class Freefrag : BasePlugin
 
         // If the bots never show up (server full, bot_quota, ...) the request must not block everyone else.
         AddTimer(issue.Count * BotSpawnInterval + BotSpawnTimeout, () => {
+            if (!_modeGate.Active)
+            {
+                return;
+            }
+
             var next = _botRequests.ExpireIfStalled(issue.OwnerSlot, issue.IssueId, out var dropped);
             if (dropped > 0)
             {
@@ -2048,6 +2089,11 @@ public class Freefrag : BasePlugin
 
         // Kick unmanaged bots
         AddTimer(2f, () => {
+            if (!_modeGate.Active)
+            {
+                return;                 // A mode switch within 2 s of StartPractice: these are the new mode's bots.
+            }
+
             var players = Utilities.GetPlayers();
             List<CCSPlayerController> botsToKick = new List<CCSPlayerController>();
             foreach(var player in players)
@@ -2332,7 +2378,7 @@ public class Freefrag : BasePlugin
             // Command shortcuts
             if (commandInfo.ArgCount > 1)
             {
-                switch (commandInfo.ArgByIndex(1))
+                switch (commandInfo.ArgByIndex(1).ToLowerInvariant())
                 {
                     case "prac":
                         int choice = 0;
