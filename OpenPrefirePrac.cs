@@ -17,7 +17,7 @@ namespace OpenPrefirePrac;
 public class OpenPrefirePrac : BasePlugin
 {
     public override string ModuleName => "Open Prefire Prac";
-    public override string ModuleVersion => "0.1.53";
+    public override string ModuleVersion => "0.1.54";
     public override string ModuleAuthor => "Lengran";
     public override string ModuleDescription => "A plugin for practicing prefire in CS2. https://github.com/largepelotas/OpenPrefirePrac (fork of lengran/OpenPrefirePrac)";
 
@@ -1888,13 +1888,8 @@ public class OpenPrefirePrac : BasePlugin
                 practiceMenu.AddMenuOption(tmpLocalizedPracticeName, OnRouteSelect); // practice name here is split by space instead of underline. TODO: Use localized text.
             }
         }
-        int practiceNo = _playerStatuses[player.Slot].PracticeIndex;
-        if (practiceNo > -1)
-        {
-            var tmpLocalizedPracticeName = _translator.Translate(player, $"map.{_mapName}.{_practices[practiceNo].PracticeName}");
-            _playerStatuses[player.Slot].LocalizedPracticeNames.Add(tmpLocalizedPracticeName, practiceNo);
-            practiceMenu.AddMenuOption(tmpLocalizedPracticeName, OnRouteSelect);
-        }
+        // The player's own active route is already listed by the loop above (RouteBlockedByOthers never
+        // blocks it), so it must not be added a second time: the dictionary would throw on the duplicate key.
 
         practiceMenu.AddMenuOption(_translator!.Translate(player, "mainmenu.close_menu"), OnCloseMenu);
 
