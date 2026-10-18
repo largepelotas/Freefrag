@@ -60,6 +60,13 @@ public class Freefrag : BasePlugin
 
     private CounterStrikeSharp.API.Modules.Timers.Timer ?_timerBroadcastProgress;
 
+    private CounterStrikeSharp.API.Modules.Timers.Timer ?_strayBotSweep;
+    private const float StrayBotSweepInterval = 5f;                 // Seconds between sweeps for bots no practicing player owns.
+
+    // bot_add timers per owner slot, so a bot request that is dropped or whose owner leaves cannot
+    // still deliver a bot afterwards.
+    private readonly Dictionary<int, List<CounterStrikeSharp.API.Modules.Timers.Timer>> _botAddTimers = new();
+
     private int _glowCount;                                         // Bots currently wearing an x-ray glow; lets CheckTransmit skip all work when zero.
 
     private readonly HashSet<string> _hookErrorsLogged = new();     // Error types already reported from engine hooks.
@@ -153,12 +160,48 @@ public class Freefrag : BasePlugin
             _timerBroadcastProgress = AddTimer(3f, () => PrintProgress(), TimerFlags.REPEAT);
         }
 
+        // The plugin owns every bot while it is loaded: no engine-managed quota, and anything that
+        // joins without a practicing player's request is a stray and gets swept.
+        Server.ExecuteCommand("bot_quota 0");
+        Server.ExecuteCommand("bot_quota_mode normal");
+        _strayBotSweep ??= AddTimer(StrayBotSweepInterval, KickStrayBots, TimerFlags.REPEAT);
+        AddTimer(1f, KickStrayBots);   // Bots that were already on the server when the plugin loaded.
+
         Console.WriteLine("[Freefrag] Plugin has been loaded. If the plugin is neither loaded along with server startup, nor reloaded on the fly, please reload it once to make it fully functional.");
     }
 
     public override void Unload(bool hotReload)
     {
         try { ScoreRepository.ReleaseAll(); } catch (Exception) { }
+
+        // The plugin owns every bot while loaded, so none may survive it.
+        if (_strayBotSweep != null)
+        {
+            _strayBotSweep.Kill();
+            _strayBotSweep = null;
+        }
+
+        foreach (var ownerSlot in _botAddTimers.Keys.ToList())
+        {
+            CancelBotAddTimers(ownerSlot);
+        }
+
+        foreach (var bot in Utilities.GetPlayers())
+        {
+            if (bot == null || !bot.IsValid || !bot.IsBot || bot.IsHLTV) continue;
+
+            if (bot.UserId.HasValue)
+                Server.ExecuteCommand($"kickid {bot.UserId.Value}");
+            else
+                Server.ExecuteCommand($"bot_kick {bot.PlayerName}");
+        }
+
+        _ownerOfBots.Clear();
+        foreach (var status in _playerStatuses.Values)
+        {
+            status.Bots.Clear();
+        }
+        _landingWatches.Clear();
 
         UnregisterCommand();
         _screenMenu?.Clear();
@@ -219,8 +262,9 @@ public class Freefrag : BasePlugin
 
         if (player.IsBot)
         {
-            // For bots: If someone is practicing and it's an unmanaged bot, add or kick the bot
-            if (_playerCount > 0 && !_ownerOfBots.ContainsKey(slot))
+            // For bots: the plugin owns every bot while loaded, so an unmanaged bot is kicked
+            // whenever no request claims it (Claim returns null on an empty queue).
+            if (!_ownerOfBots.ContainsKey(slot))
             {
                 // Only the active request's bots are being spawned, so this bot belongs to its owner
                 // unless the bot's team says otherwise (then it came from somewhere else).
@@ -266,6 +310,23 @@ public class Freefrag : BasePlugin
         if (player == null)
         {
             // Console.WriteLine("[Freefrag] OnPlayerDisconnect doesn't work now. Player = null.");
+            return HookResult.Continue;
+        }
+
+        // Bots the engine removes without us (map change, bot_quota changes): drop their records.
+        // A no-op after KickBot already dropped them.
+        if (player.IsBot)
+        {
+            if (_ownerOfBots.TryGetValue(player.Slot, out var botOwnerSlot))
+            {
+                RemoveGlow(botOwnerSlot, player.Slot);
+                if (_playerStatuses.TryGetValue(botOwnerSlot, out var botOwnerStatus))
+                {
+                    botOwnerStatus.Bots.Remove(player.Slot);
+                }
+                _ownerOfBots.Remove(player.Slot);
+            }
+            _landingWatches.Remove(player.Slot);
             return HookResult.Continue;
         }
 
@@ -1150,30 +1211,50 @@ public class Freefrag : BasePlugin
         var addCommand = issue.BotTeam == BotRequestQueue.TeamT ? "bot_add_t" : "bot_add_ct";
         Console.WriteLine($"[Freefrag] Creating {issue.Count} {joinTeam} bots for player slot {issue.OwnerSlot}.");
 
+        // Timers of an earlier request of this owner must not deliver bots for this one.
+        CancelBotAddTimers(issue.OwnerSlot);
+        var timers = new List<CounterStrikeSharp.API.Modules.Timers.Timer>();
+        _botAddTimers[issue.OwnerSlot] = timers;
+
         for (var i = 0; i < issue.Count; i++)
         {
-            AddTimer(i * BotSpawnInterval, () => {
+            timers.Add(AddTimer(i * BotSpawnInterval, () => {
                 Server.ExecuteCommand($"bot_join_team {joinTeam}");
                 Server.ExecuteCommand(addCommand);
-            });
+            }));
         }
 
         // If the bots never show up (server full, bot_quota, ...) the request must not block everyone else.
-        AddTimer(issue.Count * BotSpawnInterval + BotSpawnTimeout, () => {
+        timers.Add(AddTimer(issue.Count * BotSpawnInterval + BotSpawnTimeout, () => {
             var next = _botRequests.ExpireIfStalled(issue.OwnerSlot, issue.IssueId, out var dropped);
             if (dropped > 0)
             {
                 Console.WriteLine($"[Freefrag] Bot request of player slot {issue.OwnerSlot} timed out with {dropped} bots missing; dropping it.");
+                CancelBotAddTimers(issue.OwnerSlot);
             }
             if (next != null)
             {
                 IssueBotRequest(next);
             }
-        });
+        }));
+    }
+
+    private void CancelBotAddTimers(int ownerSlot)
+    {
+        if (!_botAddTimers.Remove(ownerSlot, out var timers))
+        {
+            return;
+        }
+
+        foreach (var timer in timers)
+        {
+            timer.Kill();
+        }
     }
 
     private void DropBotRequest(int playerSlot)
     {
+        CancelBotAddTimers(playerSlot);
         var next = _botRequests.Remove(playerSlot);
         if (next != null)
         {
@@ -1781,8 +1862,10 @@ public class Freefrag : BasePlugin
     private void RestoreConvars()
     {
         // Bool convars
+        // Convars the plugin keeps while loaded (bot_quota, ...) are skipped; see ConvarRestore.
         foreach (var convar in _serverStatus.BoolConvars)
         {
+            if (!ConvarRestore.ShouldRestore(convar.Key)) continue;
             // var tmpConvar = ConVar.Find(convar.Key);
             // tmpConvar!.SetValue(convar.Value);
             Server.ExecuteCommand(convar.Key + " " + convar.Value.ToString());
@@ -1792,6 +1875,7 @@ public class Freefrag : BasePlugin
         // Int convars
         foreach (var convar in _serverStatus.IntConvars)
         {
+            if (!ConvarRestore.ShouldRestore(convar.Key)) continue;
             // var tmpConvar = ConVar.Find(convar.Key);
             // Somehow the following 2 methods don't work, just make up a command to implement this.
             Server.ExecuteCommand(convar.Key + " " + convar.Value.ToString());
@@ -1803,6 +1887,7 @@ public class Freefrag : BasePlugin
         // Float convars
         foreach (var convar in _serverStatus.FloatConvars)
         {
+            if (!ConvarRestore.ShouldRestore(convar.Key)) continue;
             // var tmpConvar = ConVar.Find(convar.Key);
             // Somehow the following 2 methods don't work, just make up a command to implement this.
             Server.ExecuteCommand(convar.Key + " " + convar.Value.ToString());
@@ -1814,6 +1899,7 @@ public class Freefrag : BasePlugin
         // String convars
         foreach (var convar in _serverStatus.StringConvars)
         {
+            if (!ConvarRestore.ShouldRestore(convar.Key)) continue;
             // var tmpConvar = ConVar.Find(convar.Key);
             // tmpConvar!.StringValue = convar.Value;
             Server.ExecuteCommand(convar.Key + " \"" + convar.Value + "\"");
@@ -1880,29 +1966,7 @@ public class Freefrag : BasePlugin
         }
 
         // Kick unmanaged bots
-        AddTimer(2f, () => {
-            var players = Utilities.GetPlayers();
-            List<CCSPlayerController> botsToKick = new List<CCSPlayerController>();
-            foreach(var player in players)
-            {
-                if (player == null || !player.IsValid || player.IsHLTV || !player.IsBot)
-                {
-                    continue;
-                }
-
-                if (_ownerOfBots.ContainsKey(player.Slot))
-                {
-                    continue;
-                }
-
-                botsToKick.Add(player);
-            }
-            foreach (var bot in botsToKick)
-            {
-                KickBot(bot.Slot);
-            }
-            botsToKick.Clear();
-        });
+        AddTimer(2f, KickStrayBots);
 
         // Server.ExecuteCommand("bot_autodifficulty_threshold_high 5");
         // Server.ExecuteCommand("bot_autodifficulty_threshold_low 5");
@@ -3036,17 +3100,36 @@ public class Freefrag : BasePlugin
         }
     }
 
+    // A bot is a stray when it is fully connected and no practicing player owns it. The connected-state
+    // guard keeps a bot that bot_add just created, and that OnClientPutInServerHandler has not claimed
+    // yet, out of the sweep.
+    private void KickStrayBots()
+    {
+        foreach (var player in Utilities.GetPlayers())
+        {
+            if (player == null || !player.IsValid || !player.IsBot || player.IsHLTV) continue;
+            if (_ownerOfBots.ContainsKey(player.Slot)) continue;
+            if (player.Connected != PlayerConnectedState.Connected) continue;
+
+            Console.WriteLine($"[Freefrag] Kicking stray bot {player.PlayerName} (slot {player.Slot}, userid {player.UserId}).");
+            KickBot(player.Slot);
+        }
+    }
+
     private void KickBot(int botSlot)
     {
         _landingWatches.Remove(botSlot);
 
-        if (_ownerOfBots.ContainsKey(botSlot))
+        // The ownership records are dropped here, synchronously, even though the kick itself happens
+        // later in the engine: callers (FinishRoute, the remaining-targets count) need Bots accurate
+        // immediately. A kick that fails is caught by KickStrayBots, and a bot the engine removes on its
+        // own is caught by OnPlayerDisconnect.
+        if (_ownerOfBots.TryGetValue(botSlot, out var ownerSlot))
         {
-            int ownerSlot = _ownerOfBots[botSlot];
             RemoveGlow(ownerSlot, botSlot);
-            if (_playerStatuses[ownerSlot].Bots.Contains(botSlot))
+            if (_playerStatuses.TryGetValue(ownerSlot, out var ownerStatus))
             {
-                _playerStatuses[ownerSlot].Bots.Remove(botSlot);
+                ownerStatus.Bots.Remove(botSlot);
             }
             _ownerOfBots.Remove(botSlot);
         }
@@ -3058,8 +3141,17 @@ public class Freefrag : BasePlugin
             return;
         }
 
-        Server.ExecuteCommand($"bot_kick {bot.PlayerName}");
-        Console.WriteLine($"[Freefrag] Exec command: bot_kick {bot.PlayerName}");
+        // Kick by userid: bot names repeat, so bot_kick <name> can miss the bot that was meant.
+        if (bot.UserId.HasValue)
+        {
+            Server.ExecuteCommand($"kickid {bot.UserId.Value}");
+            Console.WriteLine($"[Freefrag] Exec command: kickid {bot.UserId.Value} ({bot.PlayerName})");
+        }
+        else
+        {
+            Server.ExecuteCommand($"bot_kick {bot.PlayerName}");
+            Console.WriteLine($"[Freefrag] Exec command: bot_kick {bot.PlayerName} (no userid)");
+        }
     }
 
     // Thanks to B3none
