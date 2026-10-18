@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
 public static class ScoreFormat
 {
@@ -27,7 +27,7 @@ public static class ScoreFormat
     {
         var hsPercent = row.Kills == 0 ? 0 : (int)Math.Round(100.0 * row.HeadshotKills / row.Kills);
         return $"#{rank} {row.PlayerName} {Seconds(row.ElapsedMs)} {row.Deaths}d {hsPercent}%HS " +
-               $"[{SettingsTag(row.TrainingMode, row.Difficulty, row.BotWeapon, row.HeadshotOnly)}]";
+               $"[{SettingsTag(row.TrainingMode, row.Difficulty, row.BotWeapon, row.HeadshotOnly)}]{(row.Comp ? " [comp]" : "")}";
     }
 
     public static string StatsLine(string routeDisplayName, int bestMs, int runs) =>

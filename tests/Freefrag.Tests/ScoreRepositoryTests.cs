@@ -1,4 +1,4 @@
-using OpenPrefirePrac;
+using Freefrag;
 using Xunit;
 
 public class ScoreRepositoryTests : IDisposable
@@ -19,9 +19,9 @@ public class ScoreRepositoryTests : IDisposable
     }
 
     private static ScoreRow Row(ulong steam = 1, string route = "silo_to_mini", int mode = 1, int diff = 3, int ms = 12000,
-        string name = "Quinn", int hsKills = 4, DateTime? at = null) =>
+        string name = "Quinn", int hsKills = 4, DateTime? at = null, bool comp = false) =>
         new(0, steam, name, "de_mirage", route, mode, diff, 2, false, ms, 5, 0, 5, hsKills,
-            at ?? new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+            at ?? new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc), comp);
 
     [Fact]
     public void EnsureCreatedIsIdempotent()
@@ -121,5 +121,95 @@ public class ScoreRepositoryTests : IDisposable
         ScoreRepository.ReleaseAll();
         File.Delete(_path);
         Assert.False(File.Exists(_path));
+    }
+
+    [Fact]
+    public void InsertRoundTripsTheCompFlag()
+    {
+        // Prevents a comp run from coming back as a casual run (or the reverse) from the leaderboard.
+        _repo.Insert(Row(ms: 11000, name: "Casual"));
+        _repo.Insert(Row(ms: 12000, name: "Comp", comp: true));
+
+        var top = _repo.Top("de_mirage", "silo_to_mini", 10);
+
+        Assert.False(top.Single(r => r.PlayerName == "Casual").Comp);
+        Assert.True(top.Single(r => r.PlayerName == "Comp").Comp);
+    }
+
+    [Fact]
+    public void TopCompOnlyFiltersByTheFlag()
+    {
+        // Prevents "!freefrag top comp" from listing casual runs, and the default listing from hiding comp runs.
+        _repo.Insert(Row(ms: 9000, name: "FastCasual"));
+        _repo.Insert(Row(ms: 12000, name: "CompA", comp: true));
+        _repo.Insert(Row(ms: 13000, name: "CompB", comp: true));
+
+        Assert.Equal(new[] { "FastCasual", "CompA", "CompB" }, _repo.Top("de_mirage", "silo_to_mini", 10).Select(r => r.PlayerName).ToArray());
+        Assert.Equal(new[] { "FastCasual", "CompA", "CompB" }, _repo.Top("de_mirage", "silo_to_mini", 10, null).Select(r => r.PlayerName).ToArray());
+        Assert.Equal(new[] { "CompA", "CompB" }, _repo.Top("de_mirage", "silo_to_mini", 10, true).Select(r => r.PlayerName).ToArray());
+        Assert.Equal(new[] { "FastCasual" }, _repo.Top("de_mirage", "silo_to_mini", 10, false).Select(r => r.PlayerName).ToArray());
+    }
+
+    [Fact]
+    public void EnsureCreatedMigratesADatabaseFromBeforeTheCompColumn()
+    {
+        // Prevents the plugin from failing to load (or losing old times) on a server whose scores.db predates comp mode.
+        var legacyPath = Path.GetTempFileName();
+        try
+        {
+            using (var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={legacyPath}"))
+            {
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = @"
+CREATE TABLE runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    steam_id INTEGER NOT NULL,
+    player_name TEXT NOT NULL,
+    map TEXT NOT NULL,
+    route TEXT NOT NULL,
+    mode INTEGER NOT NULL,
+    difficulty INTEGER NOT NULL,
+    bot_weapon INTEGER NOT NULL,
+    headshot_only INTEGER NOT NULL,
+    elapsed_ms INTEGER NOT NULL,
+    bots INTEGER NOT NULL,
+    deaths INTEGER NOT NULL,
+    kills INTEGER NOT NULL,
+    hs_kills INTEGER NOT NULL,
+    finished_at TEXT NOT NULL
+);
+INSERT INTO runs (steam_id, player_name, map, route, mode, difficulty, bot_weapon, headshot_only, elapsed_ms, bots, deaths, kills, hs_kills, finished_at)
+VALUES (1, 'Old', 'de_mirage', 'silo_to_mini', 1, 3, 2, 0, 15000, 5, 0, 5, 3, '2025-01-01T00:00:00.0000000Z');";
+                cmd.ExecuteNonQuery();
+            }
+            ScoreRepository.ReleaseAll();
+
+            var repo = new ScoreRepository(legacyPath);
+            repo.EnsureCreated();
+            repo.EnsureCreated();
+
+            using (var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={legacyPath}"))
+            {
+                conn.Open();
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "PRAGMA table_info(runs);";
+                var columns = new List<string>();
+                using var reader = cmd.ExecuteReader();
+                while (reader.Read()) columns.Add(reader.GetString(1));
+                Assert.Contains(columns, c => string.Equals(c, "Comp", StringComparison.OrdinalIgnoreCase));
+            }
+
+            repo.Insert(Row(ms: 11000, name: "New", comp: true));
+            var all = repo.Top("de_mirage", "silo_to_mini", 10);
+            Assert.Equal(new[] { "New", "Old" }, all.Select(r => r.PlayerName).ToArray());
+            Assert.False(all.Single(r => r.PlayerName == "Old").Comp);
+            Assert.Equal(new[] { "New" }, repo.Top("de_mirage", "silo_to_mini", 10, true).Select(r => r.PlayerName).ToArray());
+        }
+        finally
+        {
+            ScoreRepository.ReleaseAll();
+            if (File.Exists(legacyPath)) File.Delete(legacyPath);
+        }
     }
 }

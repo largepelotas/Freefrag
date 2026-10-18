@@ -1,6 +1,6 @@
-# OpenPrefirePrac
+# Klitch's Freefrag
 
-An open-source CounterStrikeSharp powered server-side practicing plugin for CS2. It provides multiple prefire practices on competitive map pool maps and support multiplayer practicing concurrently.
+Klitch's Freefrag is a fork of [OpenPrefirePrac](https://github.com/lengran/OpenPrefirePrac) by Lengran: an open-source CounterStrikeSharp powered server-side practicing plugin for CS2. It provides multiple prefire practices on competitive map pool maps and support multiplayer practicing concurrently.
 
 ## Get started
 
@@ -10,7 +10,7 @@ An open-source CounterStrikeSharp powered server-side practicing plugin for CS2.
 
 ### Installation
 
-Download [the latest release files](https://github.com/lengran/OpenPrefirePrac/releases) and extract all files into "**game/csgo/addons/counterstrikesharp/plugins/OpenPrefirePrac/**".
+Download [the latest release files](https://github.com/largepelotas/Freefrag/releases) and extract all files into "**game/csgo/addons/counterstrikesharp/plugins/Freefrag/**".
 
 To install the latest version of CounterStrikeSharp, please refer to this [guide](https://docs.cssharp.dev/docs/guides/getting-started.html).
 
@@ -43,6 +43,12 @@ There are also some shortcut commands you can use.
   - !freefrag autoskip [n/off]: Skip route after deaths.
   - !freefrag hs [on/off]: Headshot-only damage.
   - !freefrag xray [on/off]: Outline bots through walls.
+  - !freefrag botsfire [on/off]: Bots shoot back (on, default) or stand unarmed (off).
+  - !freefrag bothealth [1-1000]: Set bot health (default 100).
+  - !freefrag botarmor [0-100]: Set bot armor (default 100; 0 also removes the helmet).
+  - !freefrag countdown [0-5]: Seconds you are held still at the start spot before a route begins (default 3, 0 = off).
+  - !freefrag comp [on/off]: Comp mode. Pins bots shoot back, 100 health, 100 armor, 3 s countdown, no repeat and no spawn offset (server-configurable) and locks those settings until you turn comp off, so times are comparable. Comp runs are tagged [comp] on the leaderboard.
+  - !freefrag top [1-N] [comp]: Show the top 5 runs for a route; add comp for comp runs only.
   - !freefrag lang [en/pt/zh]: Set language. en for English, pt para português, 中文选择 zh。
   - !freefrag exit: Stop practicing.
 
@@ -86,6 +92,16 @@ Explanation of values:
 - Xray:
   - 0: Off (default).
   - 1: Bots are outlined through walls, visible only to you.
+- BotsFire:
+  - 1: Bots shoot back (default).
+  - 0: Bots spawn unarmed.
+- BotHealth:
+  - 1-1000: Health of spawned bots (default 100).
+- BotArmor:
+  - 0-100: Armor of spawned bots (default 100). 0 also removes the helmet.
+- Countdown:
+  - 0-5: Seconds the player is held still before a route begins (default 3). 0 = no countdown.
+- Comp: the values `!freefrag comp on` applies, as an object with the keys BotsFire (0/1), BotHealth, BotArmor, Countdown, Repeat (0 = off, -1 = infinite, n) and Jitter. Out-of-range values are ignored. Defaults: BotsFire 1, BotHealth 100, BotArmor 100, Countdown 3, Repeat 0, Jitter 0.
 - MenuType:
   - 0: Chat menus (type !1-!9 to choose).
   - 1: Screen menus (default), drawn in the centre of the screen. W/S move, D selects, A goes back, Tab closes. Arrow keys, Enter and Backspace work after a one-time bind; type `!freefrag binds` in chat for the line to paste into the console.

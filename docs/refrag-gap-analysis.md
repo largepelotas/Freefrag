@@ -22,7 +22,7 @@ leaderboard), `.smart` (per-mode Elo, bots scale reaction/accuracy as you improv
 |---|---|---|
 | Static-bot aim | **Prefire** | Clear a set path of bots in common spots; randomised placement; `.xray`, `.hs`, weapon presets (pistol/save/eco/force/default/AWP), `.endless`, `.autoskip`, Elo |
 | | **Angle Trainer** | Prefire without knowing which spots are filled |
-| | **Aimbotz** | Static bots that don't shoot, time-challenge in `.comp`, 1–6 spawns, jiggle toggle |
+| | **Aimbotz** | Static bots that don't shoot, time-challenge in `.comp`, 1–6 spawns, jiggle toggle. **Done in Freefrag:** bots that don't shoot (`!freefrag botsfire`), the `.comp` time-challenge (`!freefrag comp`, comp-tagged leaderboard), bot health/armor (`bothealth`, `botarmor`) and a start countdown (`countdown`) |
 | | **Pop** | Gridshot/microflick spheres, pure aim trainer |
 | Swinging-bot aim | **Quickfire** | Bots peek you with realistic movement; solo/duo; `.reaction`, `.repeekreaction`, `.aimoffset`, `.swingers`, `.repeat` |
 | | **Blitz** | Five bots swing in quick succession |
@@ -76,7 +76,7 @@ MapConfigurator, RCON.
 
 ## 3. Gaps, by how to close them
 
-### A. Build into OpenPrefirePrac (the real Refrag-only stuff)
+### A. Build into Freefrag (the real Refrag-only stuff)
 These are what the subscription buys that no free plugin provides. Ranked by value ÷ effort.
 
 1. **Quality-of-life parity for Prefire** — small, high-impact, all server-side cvars or
@@ -84,6 +84,9 @@ These are what the subscription buys that no free plugin provides. Ranked by val
    targets, prac only), weapon presets (pistol/eco/force/awp instead of one `bw`), `noprimary`,
    `endless`/`repeat N` on one route, `autoskip` after N deaths, random spawn offset
    (`.offangle`: jitter each bot a few units so the spot is learned, not the pixel).
+   **Done since:** `botsfire` (bots that don't shoot), `bothealth` and `botarmor`, `countdown`
+   (hold the player still before the route starts) and `comp` (pins those settings plus repeat
+   and jitter, tags runs, `!freefrag top comp`).
 2. **Scoring and a leaderboard** — time-to-clear, deaths, headshot %, per route per player,
    persisted to SQLite (CSS has SQLite built in). This is the `.comp` loop and the single
    biggest reason people keep paying. OPP currently records nothing.

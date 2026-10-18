@@ -1,4 +1,4 @@
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
 public sealed class RunTracker
 {

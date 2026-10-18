@@ -1,4 +1,4 @@
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
 /// <summary>
 /// Selection and scroll window of one on-screen menu level. The window always contains Index and

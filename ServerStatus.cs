@@ -1,4 +1,4 @@
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
 public class ServerStatus
 {

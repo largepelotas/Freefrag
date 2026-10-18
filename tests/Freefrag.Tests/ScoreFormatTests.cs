@@ -1,5 +1,5 @@
 using System.Globalization;
-using OpenPrefirePrac;
+using Freefrag;
 using Xunit;
 
 public class ScoreFormatTests
@@ -68,5 +68,16 @@ public class ScoreFormatTests
         // Prevents "1 runs" in the stats list.
         Assert.Equal("Attack A site from MINI: best 11.90s, 1 run", ScoreFormat.StatsLine("Attack A site from MINI", 11900, 1));
         Assert.Equal("Attack A site from MINI: best 11.90s, 7 runs", ScoreFormat.StatsLine("Attack A site from MINI", 11900, 7));
+    }
+
+    [Fact]
+    public void TopLineTagsCompRunsOnly()
+    {
+        // Prevents comp times from looking identical to casual ones in the shared leaderboard.
+        var at = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var casual = new ScoreRow(1, 76561198000000000UL, "Quinn", "de_mirage", "silo_to_mini", 1, 3, 2, false, 11900, 5, 0, 5, 4, at);
+        var comp = casual with { Comp = true };
+        Assert.Equal("#1 Quinn 11.90s 0d 80%HS [full/df3/AK47]", ScoreFormat.TopLine(1, casual));
+        Assert.Equal("#2 Quinn 11.90s 0d 80%HS [full/df3/AK47] [comp]", ScoreFormat.TopLine(2, comp));
     }
 }

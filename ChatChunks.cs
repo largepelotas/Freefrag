@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace OpenPrefirePrac;
+namespace Freefrag;
 
 /// <summary>
 /// CS2 truncates a single chat message after a few hundred bytes, so long texts such as the help
