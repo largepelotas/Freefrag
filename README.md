@@ -333,3 +333,7 @@ the console command `css_freefrag_mode <mode|none>`: `deploy.sh` replaces the pl
 in `prefire.cfg` with `css_freefrag_mode Prefire` and the unload line in `unload_plugins.cfg`
 with `css_freefrag_mode none`. It also reads the current mode from GameModeManager's API at
 load and at every map start, so a hot reload during Prefire wakes it up without a cfg.
+
+`!modes` / `/modes` opens Freefrag's own game modes menu (in every mode, active or dormant; switching still follows
+`GameModesPermission`). `deploy.sh` sets `Commands.Modes` to `false` in GameModeManager's config so its own `css_modes`
+does not run alongside it; `css_mode <name>` stays on. The change applies at the next container restart. It also copies the bundled behavior trees to `addons/scripts/ai/bt/` (where `prefire_settings.cfg` loads `hard_mode.kv3` from), so the old `custom_files/addons/counterstrikesharp/plugins/OpenPrefirePrac` mirror is no longer needed.

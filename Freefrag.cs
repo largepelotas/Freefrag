@@ -163,6 +163,21 @@ public class Freefrag : BasePlugin
             ApplyModeSignal(ModeGate.ParseSignal(commandInfo.ArgCount > 1 ? commandInfo.ArgByIndex(1) : null), "cfg");
         });
 
+        // !modes / /modes opens this plugin's game modes menu in every state. deploy.sh turns off GameModeManager's
+        // own css_modes (Commands.Modes=false): CounterStrikeSharp runs every callback of a command name, and its
+        // permission failure for players without @css/changemap would cut ours off. The permission for switching
+        // stays in BuildGameModesMenu (GameModesPermission).
+        AddCommand("css_modes", "Freefrag: open the game modes menu", (player, _) =>
+        {
+            if (player == null || !player.IsValid || player.IsBot)
+            {
+                return;
+            }
+
+            OnClientPutInServerHandler(player.Slot);        // Idempotent: makes sure the player has a status entry.
+            OpenMenu(player, BuildGameModesMenu(player));
+        });
+
         // Freefrag loads before GameModeManager at server start, so this read may come back empty; the cfg signal
         // and the next map start fill it in. On a hot reload during Prefire it finds the mode right away.
         ApplyModeSignal(ReadGameModeManagerMode(), "GameModeManager");

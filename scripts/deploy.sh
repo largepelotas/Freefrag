@@ -94,6 +94,45 @@ for f in prefire.cfg unload_plugins.cfg; do
   cp ~/cs2/custom_files/cfg/$f ~/cs2/install/game/csgo/cfg/$f
 done
 
+# !modes opens Freefrag's own game modes menu. GameModeManager's css_modes would run alongside it (CounterStrikeSharp
+# calls every callback of a command name) and its @css/changemap check would cut ours off, so turn it off in its
+# config. css_mode <name> stays enabled. Written to custom_files (merged over the install on every container start)
+# and copied to the install. GameModeManager is not reloaded from here.
+GMM_REL=addons/counterstrikesharp/configs/plugins/GameModeManager/GameModeManager.json
+GMM_CUSTOM=~/cs2/custom_files/$GMM_REL
+GMM_LIVE=~/cs2/install/game/csgo/$GMM_REL
+if [ -f "$GMM_CUSTOM" ] || [ -f "$GMM_LIVE" ]; then
+  if [ ! -f "$GMM_CUSTOM" ]; then
+    mkdir -p "$(dirname "$GMM_CUSTOM")"
+    cp "$GMM_LIVE" "$GMM_CUSTOM"
+  fi
+  GMM_RESULT=$(python3 - "$GMM_CUSTOM" <<'PYEOF'
+import json, sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as fh:
+    data = json.load(fh)
+commands = data.setdefault("Commands", {})
+if commands.get("Modes") is False:
+    print("unchanged")
+else:
+    commands["Modes"] = False
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+    print("changed")
+PYEOF
+  ) || { echo "GameModeManager.json: could not patch $GMM_CUSTOM (not valid JSON?); left as is."; GMM_RESULT=failed; }
+  if [ "$GMM_RESULT" != failed ]; then
+    mkdir -p "$(dirname "$GMM_LIVE")"
+    cp "$GMM_CUSTOM" "$GMM_LIVE"
+  fi
+  if [ "$GMM_RESULT" = changed ]; then
+    echo "GameModeManager.json: Commands.Modes set to false (takes effect at the next container restart; or run: python3 ~/cs2/rcon.py 'css_plugins reload \"GameModeManager\"')"
+  fi
+else
+  echo "GameModeManager.json not found in custom_files or the install; skipped the Commands.Modes patch."
+fi
+
 for dest in "$CUSTOM" "$LIVE"; do
   mkdir -p "$dest/lang" "$dest/resources/bt"
   cp "$OUT"/Freefrag.dll "$OUT"/Freefrag.pdb "$OUT"/Freefrag.deps.json "$dest/"
@@ -105,6 +144,14 @@ for dest in "$CUSTOM" "$LIVE"; do
   cp "$SRC"/lang/*.json "$dest/lang/"
   cp "$SRC"/resources/bt/*.kv3 "$dest/resources/bt/"                # hard_mode.kv3 points at this folder
 done
+
+# prefire_settings.cfg sets mp_bot_ai_bt to "addons\scripts\ai\bt\hard_mode.kv3", so the game loads hard_mode.kv3 from
+# there, not from the plugin folder. The repo copy includes its sub-trees by the plugins/Freefrag path.
+for root in ~/cs2/custom_files ~/cs2/install/game/csgo; do
+  mkdir -p "$root/addons/scripts/ai/bt"
+  cp "$SRC"/resources/bt/*.kv3 "$root/addons/scripts/ai/bt/"
+done
+
 # The nightly merge copies custom_files over the install, so a leftover disabled/Freefrag there would resurrect
 # a second copy of the plugin next to the real one.
 rm -rf ~/cs2/custom_files/addons/counterstrikesharp/plugins/disabled/Freefrag
