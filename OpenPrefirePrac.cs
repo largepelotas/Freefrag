@@ -1679,6 +1679,17 @@ public class OpenPrefirePrac : BasePlugin
         }
     }
 
+    // The help text outgrew one chat message; CS2 silently truncates, so send it in chunks.
+    private void PrintHelp(CCSPlayerController player)
+    {
+        var chunks = ChatChunks.Split(_translator!.Translate(player, "mainmenu.help", _practices.Count));
+        for (var i = 0; i < chunks.Count; i++)
+        {
+            var prefix = i == 0 ? $" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} " : " ";
+            player.PrintToChat(prefix + chunks[i]);
+        }
+    }
+
     private void ChangeDifficulty(CCSPlayerController player, int difficultyNo)
     {
         _playerStatuses[player.Slot].HealingMethod = difficultyNo;
@@ -1879,14 +1890,14 @@ public class OpenPrefirePrac : BasePlugin
                         ForceStopPractice(player);
                         return;
                     case "help":
-                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "mainmenu.help", _practices.Count)}");
+                        PrintHelp(player);
                         return;
                     // case "test":
                     //     SetMoney(player, 0);
                     //     AddTimer(5f, () => SetMoney(player, 123));
                     //     return;
                     default:
-                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "mainmenu.help", _practices.Count)}");
+                        PrintHelp(player);
                         break;
                 }
             }
