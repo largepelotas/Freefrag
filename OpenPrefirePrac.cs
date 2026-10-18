@@ -745,22 +745,32 @@ public class OpenPrefirePrac : BasePlugin
         if (UseScreenMenu())
         {
             _screenMenu!.Open(player, spec);
-            PrintBindsHintOnce(player);
+            PrintBindsHintUntilBound(player);
             return;
         }
 
         OpenChatMenu(player, spec);
     }
 
-    private void PrintBindsHintOnce(CCSPlayerController player)
+    // The screen menu is unusable until the player has bound the four navigation commands, so the
+    // hint and the bind line repeat on every open until one of those commands has been seen.
+    private void PrintBindsHintUntilBound(CCSPlayerController player)
     {
-        if (!_playerStatuses.TryGetValue(player.Slot, out var status) || status.BindsHintShown)
+        if (!_playerStatuses.TryGetValue(player.Slot, out var status) || status.MenuBindsUsed)
         {
             return;
         }
 
-        status.BindsHintShown = true;
         player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "menu.binds_hint")}");
+        PrintBinds(player);
+    }
+
+    private void MarkMenuBindsUsed(CCSPlayerController player)
+    {
+        if (_playerStatuses.TryGetValue(player.Slot, out var status))
+        {
+            status.MenuBindsUsed = true;
+        }
     }
 
     private void PrintBinds(CCSPlayerController player)
@@ -843,10 +853,10 @@ public class OpenPrefirePrac : BasePlugin
     // (!freefrag binds), because the server cannot set client binds.
     private void RegisterMenuCommands()
     {
-        AddCommand("css_freefrag_up", "Screen menu: move up.", (player, _) => { if (player != null) _screenMenu?.Up(player); });
-        AddCommand("css_freefrag_down", "Screen menu: move down.", (player, _) => { if (player != null) _screenMenu?.Down(player); });
-        AddCommand("css_freefrag_select", "Screen menu: choose the highlighted entry.", (player, _) => { if (player != null) _screenMenu?.Select(player); });
-        AddCommand("css_freefrag_back", "Screen menu: go back one level.", (player, _) => { if (player != null) _screenMenu?.Back(player); });
+        AddCommand("css_freefrag_up", "Screen menu: move up.", (player, _) => { if (player != null) { MarkMenuBindsUsed(player); _screenMenu?.Up(player); } });
+        AddCommand("css_freefrag_down", "Screen menu: move down.", (player, _) => { if (player != null) { MarkMenuBindsUsed(player); _screenMenu?.Down(player); } });
+        AddCommand("css_freefrag_select", "Screen menu: choose the highlighted entry.", (player, _) => { if (player != null) { MarkMenuBindsUsed(player); _screenMenu?.Select(player); } });
+        AddCommand("css_freefrag_back", "Screen menu: go back one level, or close at the main menu.", (player, _) => { if (player != null) { MarkMenuBindsUsed(player); _screenMenu?.Back(player); } });
     }
 
     private void LoadPractice()

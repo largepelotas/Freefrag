@@ -4,20 +4,17 @@ using CounterStrikeSharp.API.Core;
 namespace OpenPrefirePrac;
 
 /// <summary>
-/// Renders MenuSpecs in the centre-screen HTML area and handles navigation.
-/// Buttons W/S/D/A/Tab need no setup; the same actions are also exposed to the plugin so
-/// console commands bound to arrow keys, Enter and Backspace can drive them. This is the only menu
-/// code that touches the engine.
+/// Renders MenuSpecs in the centre-screen HTML area. Navigation is driven only by the plugin's
+/// console commands (bound client-side to arrow keys, Enter and Backspace); movement keys are
+/// deliberately not read, so the menu never fights with walking. This is the only menu code that
+/// touches the engine.
 /// </summary>
 public sealed class ScreenMenu
 {
-    private const long ScoreboardButton = 1L << 33;     // Tab; not a named PlayerButtons member.
-
     private sealed class PlayerMenu
     {
         public readonly Stack<(MenuSpec Spec, MenuCursor Cursor)> Levels = new();
         public string? Html;                            // Cached; null when it has to be rebuilt.
-        public long PreviousButtons;
     }
 
     private readonly Dictionary<int, PlayerMenu> _players = new();
@@ -49,7 +46,6 @@ public sealed class ScreenMenu
     {
         var menu = GetOrAdd(player);
         menu.Levels.Clear();
-        menu.PreviousButtons = ReadButtons(player);     // Keys already held must not count as presses.
         PushLevel(menu, spec);
     }
 
@@ -121,24 +117,6 @@ public sealed class ScreenMenu
         if (!_players.TryGetValue(player.Slot, out var menu) || menu.Levels.Count == 0)
             return;
 
-        var buttons = ReadButtons(player);
-        var pressed = buttons & ~menu.PreviousButtons;
-        menu.PreviousButtons = buttons;
-
-        if ((pressed & ScoreboardButton) != 0)
-            Close(player);
-        else if ((pressed & (long)PlayerButtons.Forward) != 0)
-            Up(player);
-        else if ((pressed & (long)PlayerButtons.Back) != 0)
-            Down(player);
-        else if ((pressed & (long)PlayerButtons.Moveright) != 0)
-            Select(player);
-        else if ((pressed & (long)PlayerButtons.Moveleft) != 0)
-            Back(player);
-
-        if (menu.Levels.Count == 0)
-            return;
-
         // The centre text fades, so it is re-sent every tick.
         var html = menu.Html ??= BuildHtml(player, menu);
         Server.NextFrame(() =>
@@ -185,17 +163,5 @@ public sealed class ScreenMenu
         var (spec, cursor) = menu.Levels.Peek();
         var labels = spec.Items.Select(item => item.Label).ToList();
         return ScreenMenuHtml.Render(spec.Title, labels, cursor, _footer(player));
-    }
-
-    private static long ReadButtons(CCSPlayerController player)
-    {
-        try
-        {
-            return (long)player.Buttons;
-        }
-        catch (Exception)
-        {
-            return 0;
-        }
     }
 }

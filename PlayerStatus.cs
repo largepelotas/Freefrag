@@ -61,7 +61,7 @@ public class PlayerStatus
     public int PendingRoute = -1;
     public bool HeadshotOnly = false;
     public bool Xray = false;
-    public bool BindsHintShown = false;                  // The arrow-key bind hint is printed once per session.
+    public bool MenuBindsUsed = false;                   // A menu navigation command has been seen; the bind hint stops.
     public readonly RunTracker Run = new();
     public readonly Dictionary<int, List<int>> GlowEntities = new();         // bot slot -> entity indices of its glow props
 
