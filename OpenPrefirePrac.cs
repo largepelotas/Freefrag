@@ -52,6 +52,9 @@ public class OpenPrefirePrac : BasePlugin
 
     private CommandDefinition ?_command;
 
+    private WasdBackend ?_wasd;                                     // WASDMenuAPI renderer; null until the capability is found.
+    private bool _wasdProbed;                                       // The "not found" note is logged once.
+
     private CounterStrikeSharp.API.Modules.Timers.Timer ?_timerBroadcastProgress;
 
     private int _glowCount;                                         // Bots currently wearing an x-ray glow; lets CheckTransmit skip all work when zero.
@@ -544,112 +547,99 @@ public class OpenPrefirePrac : BasePlugin
         return HookResult.Continue;
     }
 
-    public void OnRouteSelect(CCSPlayerController player, ChatMenuOption option)
+    // Menus are described once as MenuSpecs (PrefireMenu.cs) and rendered by whichever backend is active:
+    // WASD menus through the WASDMenuAPI plugin, or the stock ChatMenu (see ActiveWasd).
+
+    private void OnRouteSelect(CCSPlayerController player, string label)
     {
-        int practiceNo = _playerStatuses[player.Slot].LocalizedPracticeNames[option.Text];
+        int practiceNo = _playerStatuses[player.Slot].LocalizedPracticeNames[label];
         StartPractice(player, practiceNo);
-        CloseCurrentMenu(player);
+        CloseAllMenus(player);
     }
 
-    public void OnForceExitPrefireMode(CCSPlayerController player, ChatMenuOption option)
+    private void OnForceExitPrefireMode(CCSPlayerController player)
     {
         ForceStopPractice(player);
-        CloseCurrentMenu(player);
+        CloseAllMenus(player);
     }
 
-    public void OpenMapMenu(CCSPlayerController player, ChatMenuOption option)
+    private MenuSpec BuildMapMenu(CCSPlayerController player)
     {
-        var mapMenu = new ChatMenu(_translator!.Translate(player, "mapmenu.title"));
+        var items = new List<MenuItem>();
         foreach (var map in _availableMaps)
         {
-            mapMenu.AddMenuOption(map, OnMapSelected);
+            var mapName = map;
+            items.Add(new MenuItem(mapName, p =>
+            {
+                ChangeMap(p, mapName);
+                CloseWasdMenu(p);   // The chat menu closes itself on selection; the WASD menu does not.
+            }));
         }
-        mapMenu.AddMenuOption(_translator!.Translate(player, "mainmenu.close_menu"), OnCloseMenu);
 
-        player.PrintToChat("============ [OpenPrefirePrac] ============");
-        MenuManager.OpenChatMenu(player, mapMenu);
-        player.PrintToChat("===========================================");
+        return new MenuSpec(_translator!.Translate(player, "mapmenu.title"), items);
     }
 
-    public void OnMapSelected(CCSPlayerController player, ChatMenuOption option)
-    {
-        ChangeMap(player, option.Text);
-    }
-
-    public void OnOpenPracticeMenu(CCSPlayerController player, ChatMenuOption option)
-    {
-        OpenPracticeMenu(player);
-    }
-
-    public void OpenDifficultyMenu(CCSPlayerController player, ChatMenuOption option)
+    private MenuSpec BuildDifficultyMenu(CCSPlayerController player)
     {
         // Dynamically draw menu
-        var difficultyMenu = new ChatMenu(_translator!.Translate(player, "difficulty.title"));
+        var items = new List<MenuItem>();
         _playerStatuses[player.Slot].LocalizedDifficultyNames.Clear();
 
         for (var i = 0; i < 5; i++)
         {
-            var tmpLocalizedDifficultyName = _translator.Translate(player, $"difficulty.{i}");
+            var tmpLocalizedDifficultyName = _translator!.Translate(player, $"difficulty.{i}");
             _playerStatuses[player.Slot].LocalizedDifficultyNames.Add(tmpLocalizedDifficultyName, i);
-            difficultyMenu.AddMenuOption(tmpLocalizedDifficultyName, OnDifficultyChosen); // practice name here is split by space instead of underline. TODO: Use localized text.
+            items.Add(new MenuItem(tmpLocalizedDifficultyName, p => OnDifficultyChosen(p, tmpLocalizedDifficultyName))); // practice name here is split by space instead of underline. TODO: Use localized text.
         }
-        difficultyMenu.AddMenuOption(_translator!.Translate(player, "mainmenu.close_menu"), OnCloseMenu);
 
-        player.PrintToChat("============ [OpenPrefirePrac] ============");
-        MenuManager.OpenChatMenu(player, difficultyMenu);
-        player.PrintToChat("===========================================");
+        return new MenuSpec(_translator!.Translate(player, "difficulty.title"), items);
     }
 
-    public void OnDifficultyChosen(CCSPlayerController player, ChatMenuOption option)
+    private void OnDifficultyChosen(CCSPlayerController player, string label)
     {
-        int difficultyNo = _playerStatuses[player.Slot].LocalizedDifficultyNames[option.Text];
+        int difficultyNo = _playerStatuses[player.Slot].LocalizedDifficultyNames[label];
         ChangeDifficulty(player, difficultyNo);
-        CloseCurrentMenu(player);
+        AfterSettingChosen(player);
     }
 
-    public void OpenModeMenu(CCSPlayerController player, ChatMenuOption option)
+    private MenuSpec BuildModeMenu(CCSPlayerController player)
     {
-        var trainingModeMenu = new ChatMenu(_translator!.Translate(player, "modemenu.title"));
+        var items = new List<MenuItem>();
         _playerStatuses[player.Slot].LocalizedTrainingModeNames.Clear();
 
         for (var i = 0; i < 2; i++)
         {
-            var tmpLocalizedTrainingModeName = _translator.Translate(player, $"modemenu.{i}");
+            var tmpLocalizedTrainingModeName = _translator!.Translate(player, $"modemenu.{i}");
             _playerStatuses[player.Slot].LocalizedTrainingModeNames.Add(tmpLocalizedTrainingModeName, i);
-            trainingModeMenu.AddMenuOption(tmpLocalizedTrainingModeName, OnModeChosen);
+            items.Add(new MenuItem(tmpLocalizedTrainingModeName, p => OnModeChosen(p, tmpLocalizedTrainingModeName)));
         }
-        trainingModeMenu.AddMenuOption(_translator!.Translate(player, "mainmenu.close_menu"), OnCloseMenu);
 
-        player.PrintToChat("============ [OpenPrefirePrac] ============");
-        MenuManager.OpenChatMenu(player, trainingModeMenu);
-        player.PrintToChat("===========================================");
+        return new MenuSpec(_translator!.Translate(player, "modemenu.title"), items);
     }
 
-    public void OnModeChosen(CCSPlayerController player, ChatMenuOption option)
+    private void OnModeChosen(CCSPlayerController player, string label)
     {
-        var trainingModeNo = _playerStatuses[player.Slot].LocalizedTrainingModeNames[option.Text];
+        var trainingModeNo = _playerStatuses[player.Slot].LocalizedTrainingModeNames[label];
         ChangeTrainingMode(player, trainingModeNo);
-        CloseCurrentMenu(player);
+        AfterSettingChosen(player);
     }
 
-    public void OpenLanguageMenu(CCSPlayerController player, ChatMenuOption option)
+    private MenuSpec BuildLanguageMenu(CCSPlayerController player)
     {
         // No need for localization here.
-        var languageMenu = new ChatMenu("Change language settings");
+        var items = new List<MenuItem>
+        {
+            new MenuItem("English", p => OnLanguageChosen(p, "English")),
+            new MenuItem("Português", p => OnLanguageChosen(p, "Português")),
+            new MenuItem("中文", p => OnLanguageChosen(p, "中文")),
+        };
 
-        languageMenu.AddMenuOption("English", OnLanguageChosen);
-        languageMenu.AddMenuOption("Português", OnLanguageChosen);
-        languageMenu.AddMenuOption("中文", OnLanguageChosen);
-        languageMenu.AddMenuOption(_translator!.Translate(player, "mainmenu.close_menu"), OnCloseMenu);
-
-        player.PrintToChat("============ [OpenPrefirePrac] ============");
-        MenuManager.OpenChatMenu(player, languageMenu);
-        player.PrintToChat("===========================================");
+        return new MenuSpec("Change language settings", items);
     }
 
-    public void OnLanguageChosen(CCSPlayerController player, ChatMenuOption option)
+    private void OnLanguageChosen(CCSPlayerController player, string label)
     {
-        switch (option.Text)
+        switch (label)
         {
             case "English":
                 _translator!.UpdatePlayerCulture(player.SteamID, "EN");
@@ -666,38 +656,30 @@ public class OpenPrefirePrac : BasePlugin
         }
 
         player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "languagemenu.set")}");
-        CloseCurrentMenu(player);
+        AfterSettingChosen(player);
     }
 
-    public void OnCloseMenu(CCSPlayerController player, ChatMenuOption option)
-    {
-        CloseCurrentMenu(player);
-    }
-
-    public void OpenBotWeaponMenu(CCSPlayerController player, ChatMenuOption option)
+    private MenuSpec BuildBotWeaponMenu(CCSPlayerController player)
     {
         // Dynamically draw menu
-        var botWeaponMenu = new ChatMenu(_translator!.Translate(player, "weaponmenu.title"));
+        var items = new List<MenuItem>();
+        var labels = new[]
+        {
+            _translator!.Translate(player, "weaponmenu.random"),
+            "UMP-45", "AK47", "SSG08", "AWP", "Pistol", "Eco", "Force",
+        };
+        foreach (var label in labels)
+        {
+            var weaponLabel = label;
+            items.Add(new MenuItem(weaponLabel, p => OnBotWeaponChosen(p, weaponLabel)));
+        }
 
-        botWeaponMenu.AddMenuOption(_translator!.Translate(player, "weaponmenu.random"), OnBotWeaponChosen);
-        botWeaponMenu.AddMenuOption("UMP-45", OnBotWeaponChosen);
-        botWeaponMenu.AddMenuOption("AK47", OnBotWeaponChosen);
-        botWeaponMenu.AddMenuOption("SSG08", OnBotWeaponChosen);
-        botWeaponMenu.AddMenuOption("AWP", OnBotWeaponChosen);
-        botWeaponMenu.AddMenuOption("Pistol", OnBotWeaponChosen);
-        botWeaponMenu.AddMenuOption("Eco", OnBotWeaponChosen);
-        botWeaponMenu.AddMenuOption("Force", OnBotWeaponChosen);
-
-        botWeaponMenu.AddMenuOption(_translator!.Translate(player, "mainmenu.close_menu"), OnCloseMenu);
-
-        player.PrintToChat("============ [OpenPrefirePrac] ============");
-        MenuManager.OpenChatMenu(player, botWeaponMenu);
-        player.PrintToChat("===========================================");
+        return new MenuSpec(_translator!.Translate(player, "weaponmenu.title"), items);
     }
 
-    public void OnBotWeaponChosen(CCSPlayerController player, ChatMenuOption option)
+    private void OnBotWeaponChosen(CCSPlayerController player, string label)
     {
-        var botWeaponChoice = option.Text switch
+        var botWeaponChoice = label switch
         {
             "UMP-45" => 1,
             "AK47" => 2,
@@ -711,7 +693,122 @@ public class OpenPrefirePrac : BasePlugin
 
         SetBotWeapon(player, botWeaponChoice);
 
-        CloseCurrentMenu(player);
+        AfterSettingChosen(player);
+    }
+
+    /// <summary>Returns the WASD backend when it is both configured and installed; null means use chat menus.</summary>
+    private WasdBackend? ActiveWasd()
+    {
+        int configured = _defaultPlayerSettings?.MenuType ?? MenuBackend.Wasd;
+        if (configured == MenuBackend.Chat)
+        {
+            return null;
+        }
+
+        if (_wasd == null)
+        {
+            // Probe again on every open until it is found: WASDMenuAPI may load after this plugin.
+            try
+            {
+                _wasd = WasdBackend.TryCreate();
+            }
+            catch (Exception ex)
+            {
+                // The shared assembly itself is missing (WASDMenuAPI not installed).
+                _wasd = null;
+                if (!_wasdProbed)
+                {
+                    Console.WriteLine($"[OpenPrefirePrac] WASDMenuAPI shared library unavailable ({ex.GetType().Name}).");
+                }
+            }
+
+            if (_wasd == null && !_wasdProbed)
+            {
+                Console.WriteLine("[OpenPrefirePrac] WASDMenuAPI not found. Using chat menus until it is loaded.");
+            }
+            _wasdProbed = true;
+        }
+
+        return MenuBackend.Choose(configured, _wasd != null) == MenuBackend.Wasd ? _wasd : null;
+    }
+
+    private void OpenMenu(CCSPlayerController player, MenuSpec spec, bool replaceOpenMenu = false)
+    {
+        var wasd = ActiveWasd();
+        if (wasd != null)
+        {
+            wasd.OpenMain(player, spec, replaceOpenMenu);
+            return;
+        }
+
+        OpenChatMenu(player, spec);
+    }
+
+    private void OpenChatMenu(CCSPlayerController player, MenuSpec spec)
+    {
+        var menu = new ChatMenu(spec.Title);
+        foreach (var item in spec.Items)
+        {
+            var menuItem = item;
+            menu.AddMenuOption(menuItem.Label, (p, _) =>
+            {
+                if (menuItem.Submenu != null)
+                {
+                    OpenChatMenu(p, menuItem.Submenu());
+                }
+                else
+                {
+                    menuItem.OnChoose(p);
+                }
+            });
+        }
+        menu.AddMenuOption(_translator!.Translate(player, "mainmenu.close_menu"), (p, _) => CloseCurrentMenu(p));
+
+        player.PrintToChat("============ [OpenPrefirePrac] ============");
+        MenuManager.OpenChatMenu(player, menu);
+        if (spec.ChatFooter != null)
+        {
+            player.PrintToChat(spec.ChatFooter);
+        }
+        player.PrintToChat("===========================================");
+    }
+
+    /// <summary>Closes the WASD menu if that backend is active; the chat menu needs nothing here.</summary>
+    private bool CloseWasdMenu(CCSPlayerController player)
+    {
+        var wasd = ActiveWasd();
+        if (wasd == null)
+        {
+            return false;
+        }
+
+        wasd.CloseAll(player);
+        return true;
+    }
+
+    /// <summary>Route picked, exit, or close: nothing stays open on either backend.</summary>
+    private void CloseAllMenus(CCSPlayerController player)
+    {
+        if (!CloseWasdMenu(player))
+        {
+            CloseCurrentMenu(player);
+        }
+    }
+
+    /// <summary>
+    /// A setting was changed from a submenu. Chat: close, as it always did. WASD: go back to a rebuilt main
+    /// menu, because its "Current ..." labels were rendered before the change.
+    /// </summary>
+    private void AfterSettingChosen(CCSPlayerController player)
+    {
+        if (ActiveWasd() != null)
+        {
+            OpenMenu(player, BuildMainMenu(player), replaceOpenMenu: true);
+        }
+        else
+        {
+            CloseCurrentMenu(player);
+        }
     }
 
     private void LoadPractice()
@@ -1903,45 +2000,46 @@ public class OpenPrefirePrac : BasePlugin
             }
 
             // Draw the menu
-            var mainMenu = new ChatMenu(_translator!.Translate(player, "mainmenu.title"));
-
-            // 1 Practice menu
-            mainMenu.AddMenuOption(_translator.Translate(player, "mainmenu.practice"), OnOpenPracticeMenu);
-
-            // 2 Map menu
-            mainMenu.AddMenuOption(_translator.Translate(player, "mainmenu.map"), OpenMapMenu);
-
-            // 3 Difficulty menu
-            string currentDifficulty = _translator.Translate(player, $"difficulty.{_playerStatuses[player.Slot].HealingMethod}");
-            mainMenu.AddMenuOption(_translator.Translate(player, "mainmenu.difficulty", currentDifficulty), OpenDifficultyMenu);
-            
-            // 4 Training mode menu
-            string currentTrainingMode = _translator.Translate(player, $"modemenu.{_playerStatuses[player.Slot].TrainingMode}");
-            mainMenu.AddMenuOption(_translator.Translate(player, "mainmenu.mode", currentTrainingMode), OpenModeMenu);
-
-            // 5 Bot weapon menu
-            string currentBotWeapon = _playerStatuses[player.Slot].BotWeapon == 0 ? _translator!.Translate(player, "weaponmenu.random") : BotLoadout.DisplayName(_playerStatuses[player.Slot].BotWeapon);
-            mainMenu.AddMenuOption(_translator!.Translate(player, "mainmenu.bot_weapon", currentBotWeapon), OpenBotWeaponMenu);
-
-            // 6 Language menu
-            mainMenu.AddMenuOption("Language preference", OpenLanguageMenu);
-
-            // 7 (Optional) End practicing button
-            if (_playerStatuses[player.Slot].PracticeIndex > 0)
-            {
-                mainMenu.AddMenuOption(_translator.Translate(player, "mainmenu.exit"), OnForceExitPrefireMode);
-            }
-
-            // 8 Close menu button.
-            mainMenu.AddMenuOption(_translator!.Translate(player, "mainmenu.close_menu"), OnCloseMenu);
-
-            player.PrintToChat("============ [OpenPrefirePrac] ============");
-            MenuManager.OpenChatMenu(player, mainMenu);
-            player.PrintToChat(_translator.Translate(player, "mainmenu.shortcut_prompt"));
-            player.PrintToChat("===========================================");
+            OpenMenu(player, BuildMainMenu(player));
         });
 
         CommandManager.RegisterCommand(_command);
+    }
+
+    private MenuSpec BuildMainMenu(CCSPlayerController player)
+    {
+        var items = new List<MenuItem>();
+
+        // 1 Practice menu
+        items.Add(MenuItem.Opens(_translator!.Translate(player, "mainmenu.practice"), () => BuildPracticeMenu(player)));
+
+        // 2 Map menu
+        items.Add(MenuItem.Opens(_translator.Translate(player, "mainmenu.map"), () => BuildMapMenu(player)));
+
+        // 3 Difficulty menu
+        string currentDifficulty = _translator.Translate(player, $"difficulty.{_playerStatuses[player.Slot].HealingMethod}");
+        items.Add(MenuItem.Opens(_translator.Translate(player, "mainmenu.difficulty", currentDifficulty), () => BuildDifficultyMenu(player)));
+
+        // 4 Training mode menu
+        string currentTrainingMode = _translator.Translate(player, $"modemenu.{_playerStatuses[player.Slot].TrainingMode}");
+        items.Add(MenuItem.Opens(_translator.Translate(player, "mainmenu.mode", currentTrainingMode), () => BuildModeMenu(player)));
+
+        // 5 Bot weapon menu
+        string currentBotWeapon = _playerStatuses[player.Slot].BotWeapon == 0 ? _translator!.Translate(player, "weaponmenu.random") : BotLoadout.DisplayName(_playerStatuses[player.Slot].BotWeapon);
+        items.Add(MenuItem.Opens(_translator!.Translate(player, "mainmenu.bot_weapon", currentBotWeapon), () => BuildBotWeaponMenu(player)));
+
+        // 6 Language menu
+        items.Add(MenuItem.Opens("Language preference", () => BuildLanguageMenu(player)));
+
+        // 7 (Optional) End practicing button
+        if (_playerStatuses[player.Slot].PracticeIndex > 0)
+        {
+            items.Add(new MenuItem(_translator.Translate(player, "mainmenu.exit"), OnForceExitPrefireMode));
+        }
+
+        // 8 Close menu button: added by the chat renderer; the WASD menu has its own exit key.
+
+        return new MenuSpec(_translator!.Translate(player, "mainmenu.title"), items, _translator.Translate(player, "mainmenu.shortcut_prompt"));
     }
 
     private void CloseCurrentMenu(CCSPlayerController player)
@@ -1959,10 +2057,10 @@ public class OpenPrefirePrac : BasePlugin
         player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "weaponmenu.set", weaponName)}");
     }
 
-    private void OpenPracticeMenu(CCSPlayerController player)
+    private MenuSpec BuildPracticeMenu(CCSPlayerController player)
     {
         // Dynamically draw menu
-        var practiceMenu = new ChatMenu(_translator!.Translate(player, "practicemenu.title"));
+        var items = new List<MenuItem>();
         _playerStatuses[player.Slot].LocalizedPracticeNames.Clear();
 
         // Add menu options for practices
@@ -1970,19 +2068,15 @@ public class OpenPrefirePrac : BasePlugin
         {
             if (!RouteBlockedByOthers(player.Slot, i))
             {
-                var tmpLocalizedPracticeName = _translator.Translate(player, $"map.{_mapName}.{_practices[i].PracticeName}");
+                var tmpLocalizedPracticeName = _translator!.Translate(player, $"map.{_mapName}.{_practices[i].PracticeName}");
                 _playerStatuses[player.Slot].LocalizedPracticeNames.Add(tmpLocalizedPracticeName, i);
-                practiceMenu.AddMenuOption(tmpLocalizedPracticeName, OnRouteSelect); // practice name here is split by space instead of underline. TODO: Use localized text.
+                items.Add(new MenuItem(tmpLocalizedPracticeName, p => OnRouteSelect(p, tmpLocalizedPracticeName))); // practice name here is split by space instead of underline. TODO: Use localized text.
             }
         }
         // The player's own active route is already listed by the loop above (RouteBlockedByOthers never
         // blocks it), so it must not be added a second time: the dictionary would throw on the duplicate key.
 
-        practiceMenu.AddMenuOption(_translator!.Translate(player, "mainmenu.close_menu"), OnCloseMenu);
-
-        player.PrintToChat("============ [OpenPrefirePrac] ============");
-        MenuManager.OpenChatMenu(player, practiceMenu);
-        player.PrintToChat("===========================================");
+        return new MenuSpec(_translator!.Translate(player, "practicemenu.title"), items);
     }
 
     private void UnsetPrefireMode(int playerSlot)

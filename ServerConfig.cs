@@ -19,6 +19,12 @@ public class DefaultConfig
     public int Xray { get; set; } = 0;
 
     /*
+     * 0 = chat menus.
+     * 1 = WASD menus through the WASDMenuAPI plugin; falls back to chat menus when it is not installed.
+    */
+    public int MenuType { get; set; } = 1;
+
+    /*
      * 0 = disabled.
      * 1 = css based aim lock.
      * 2 = behavior tree based aim lock (hard).
@@ -100,6 +106,11 @@ public class DefaultConfig
                     Xray = jsonConfig.Xray;
                 }
 
+                if (jsonConfig.MenuType > -1 && jsonConfig.MenuType < 2)
+                {
+                    MenuType = jsonConfig.MenuType;
+                }
+
                 if (jsonConfig.BotAimLock > -1 && jsonConfig.BotAimLock < 3)
                 {
                     BotAimLock = jsonConfig.BotAimLock;
@@ -110,7 +121,7 @@ public class DefaultConfig
                     EquipPlayer = jsonConfig.EquipPlayer;
                 }
 
-                Console.WriteLine($"[OpenPrefirePrac] Using default settings: Difficulty = {Difficulty}, TrainingMode = {TrainingMode}, BotWeapon = {BotWeapon}, PlayerGun = {PlayerGun}, Jitter = {Jitter}, HeadshotOnly = {HeadshotOnly}, Xray = {Xray}, BotAimLock = {BotAimLock}, EquipPlayer = {EquipPlayer}");
+                Console.WriteLine($"[OpenPrefirePrac] Using default settings: Difficulty = {Difficulty}, TrainingMode = {TrainingMode}, BotWeapon = {BotWeapon}, PlayerGun = {PlayerGun}, Jitter = {Jitter}, HeadshotOnly = {HeadshotOnly}, Xray = {Xray}, MenuType = {MenuType}, BotAimLock = {BotAimLock}, EquipPlayer = {EquipPlayer}");
             }
             catch (System.Exception)
             {
