@@ -156,5 +156,16 @@
     "moremenu.countdown": "Start countdown: {0}",
     "bothealthmenu.title": "Bot health",
     "botarmormenu.title": "Bot armor",
-    "countdownmenu.title": "Start countdown (seconds)"
+    "countdownmenu.title": "Start countdown (seconds)",
+    "mainmenu.gamemodes": "游戏模式",
+    "gamemodesmenu.title": "游戏模式",
+    "gamemodesmenu.confirm_title": "切换服务器到 {0}？",
+    "gamemodesmenu.confirm_yes": "是，立即切换",
+    "gamemodesmenu.confirm_no": "否，返回",
+    "gamemodesmenu.none": "未找到游戏模式（缺少 GameModeManager.json）",
+    "gamemodesmenu.denied": "你没有权限切换游戏模式",
+    "gamemodes.switching": "正在将服务器切换到 {0}...",
+    "gamemodes.unknown": "未知的游戏模式：{0}",
+    "gamemodes.denied": "你没有权限切换游戏模式。",
+    "gamemodes.help": "[PURPLE]modes[NORMAL] [名称]：列出服务器的游戏模式，或直接切换到某个模式。切换会卸载 Freefrag。"
 }

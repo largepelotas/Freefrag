@@ -1,6 +1,7 @@
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
+using CounterStrikeSharp.API.Modules.Admin;
 using CounterStrikeSharp.API.Modules.Commands;
 using CounterStrikeSharp.API.Modules.Menu;
 using CounterStrikeSharp.API.Modules.Utils;
@@ -2065,6 +2066,7 @@ public class Freefrag : BasePlugin
             var prefix = i == 0 ? $" {ChatColors.Green}{ChatPrefix} {ChatColors.White} " : " ";
             player.PrintToChat(prefix + chunks[i]);
         }
+        player.PrintToChat(" " + _translator.Translate(player, "gamemodes.help"));
     }
 
     private void ChangeDifficulty(CCSPlayerController player, int difficultyNo)
@@ -2316,6 +2318,35 @@ public class Freefrag : BasePlugin
                     case "binds":
                         PrintBinds(player);
                         return;
+                    case "modes":
+                    case "gamemodes":
+                    {
+                        if (commandInfo.ArgCount > 2)
+                        {
+                            // An explicit chat command is its own confirmation.
+                            var modeQuery = string.Join(" ", Enumerable.Range(2, commandInfo.ArgCount - 2).Select(argIndex => commandInfo.ArgByIndex(argIndex)));
+                            var chosenMode = GameModeList.Find(LoadGameModes(), modeQuery);
+                            if (chosenMode == null)
+                            {
+                                player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "gamemodes.unknown", modeQuery)}");
+                                return;
+                            }
+
+                            SwitchGameMode(player, chosenMode);
+                            return;
+                        }
+
+                        if (UseScreenMenu())
+                        {
+                            OpenMenu(player, BuildMainMenu(player));
+                            _screenMenu!.Push(player, BuildGameModesMenu(player));
+                        }
+                        else
+                        {
+                            OpenMenu(player, BuildGameModesMenu(player));
+                        }
+                        return;
+                    }
                     case "help":
                         PrintHelp(player);
                         return;
@@ -2334,6 +2365,129 @@ public class Freefrag : BasePlugin
         });
 
         CommandManager.RegisterCommand(_command);
+    }
+
+    private string? _lastGameModesWarning;
+
+    /// <summary>
+    /// The server's game modes from GameModeManager.json, read fresh each time because the admin may edit it.
+    /// Empty (with one console line per distinct problem) when the file is missing or unreadable.
+    /// </summary>
+    private IReadOnlyList<GameMode> LoadGameModes()
+    {
+        string? path = null;
+        try
+        {
+            var configured = _defaultPlayerSettings?.GameModesConfig ?? "";
+            path = string.IsNullOrWhiteSpace(configured)
+                ? GameModeList.FindConfigPath(ModuleDirectory, File.Exists)
+                : configured;
+            if (path == null)
+            {
+                WarnGameModes("GameModeManager.json not found next to this plugin; set GameModesConfig in default_cfg.json.");
+                return Array.Empty<GameMode>();
+            }
+
+            var modes = GameModeList.Parse(File.ReadAllText(path));
+            _lastGameModesWarning = null;
+            return modes;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            WarnGameModes($"could not read {path}: {e.Message}");
+            return Array.Empty<GameMode>();
+        }
+    }
+
+    private void WarnGameModes(string message)
+    {
+        if (_lastGameModesWarning == message)
+        {
+            return;
+        }
+
+        _lastGameModesWarning = message;
+        Console.WriteLine($"[Freefrag] Game modes: {message}");
+    }
+
+    private bool CanSwitchGameModes(CCSPlayerController player)
+    {
+        var flag = _defaultPlayerSettings?.GameModesPermission ?? "";
+        return string.IsNullOrWhiteSpace(flag) || AdminManager.PlayerHasPermissions(player, flag);
+    }
+
+    private MenuSpec BuildGameModesMenu(CCSPlayerController player)
+    {
+        var title = _translator!.Translate(player, "gamemodesmenu.title");
+        if (!CanSwitchGameModes(player))
+        {
+            return new MenuSpec(title, new List<MenuItem>
+            {
+                new MenuItem(_translator.Translate(player, "gamemodesmenu.denied"), AfterSettingChosen),
+            });
+        }
+
+        var modes = LoadGameModes();
+        if (modes.Count == 0)
+        {
+            return new MenuSpec(title, new List<MenuItem>
+            {
+                new MenuItem(_translator.Translate(player, "gamemodesmenu.none"), AfterSettingChosen),
+            });
+        }
+
+        var items = new List<MenuItem>();
+        foreach (var mode in modes)
+        {
+            var chosen = mode;
+            items.Add(MenuItem.Opens(chosen.Name, () => BuildGameModeConfirmMenu(player, chosen)));
+        }
+
+        return new MenuSpec(title, items);
+    }
+
+    private MenuSpec BuildGameModeConfirmMenu(CCSPlayerController player, GameMode mode)
+    {
+        var items = new List<MenuItem>
+        {
+            new MenuItem(_translator!.Translate(player, "gamemodesmenu.confirm_yes"), p => SwitchGameMode(p, mode)),
+            new MenuItem(_translator.Translate(player, "gamemodesmenu.confirm_no"), AfterGameModeDeclined),
+        };
+
+        return new MenuSpec(_translator.Translate(player, "gamemodesmenu.confirm_title", mode.Name), items);
+    }
+
+    /// <summary>"No, go back": rebuild main and put the mode list back on top (Back still returns to main).</summary>
+    private void AfterGameModeDeclined(CCSPlayerController player)
+    {
+        if (CloseScreenMenu(player))
+        {
+            OpenMenu(player, BuildMainMenu(player));
+            _screenMenu!.Push(player, BuildGameModesMenu(player));
+        }
+        else
+        {
+            CloseCurrentMenu(player);
+        }
+    }
+
+    /// <summary>
+    /// Runs the mode's cfg, exactly as an admin would by rcon. Most modes unload this plugin, so the menu is
+    /// closed first and the command waits for the next frame.
+    /// </summary>
+    private void SwitchGameMode(CCSPlayerController player, GameMode mode)
+    {
+        if (!CanSwitchGameModes(player))
+        {
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "gamemodes.denied")}");
+            return;
+        }
+
+        CloseAllMenus(player);
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "gamemodes.switching", mode.Name)}");
+        Console.WriteLine($"[Freefrag] {player.PlayerName} ({player.SteamID}) switched the server to game mode {mode.Name} ({mode.Config}).");
+        var command = GameModeList.SwitchCommand(mode);
+        Server.NextFrame(() => Server.ExecuteCommand(command));
     }
 
     private MenuSpec BuildMainMenu(CCSPlayerController player)
@@ -2360,6 +2514,9 @@ public class Freefrag : BasePlugin
 
         // 6 More options menu
         items.Add(MenuItem.Opens(_translator.Translate(player, "mainmenu.more"), () => BuildMoreOptionsMenu(player)));
+
+        // Game modes menu
+        items.Add(MenuItem.Opens(_translator.Translate(player, "mainmenu.gamemodes"), () => BuildGameModesMenu(player)));
 
         // 7 Language menu
         items.Add(MenuItem.Opens("Language preference", () => BuildLanguageMenu(player)));
