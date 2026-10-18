@@ -12,4 +12,6 @@ cd "$(dirname "$0")/.."
 
 ssh "$HOST" "mkdir -p ~/cs2/custom_files/$REL && cp -r ~/cs2/install/game/csgo/$REL/. ~/cs2/custom_files/$REL/ && tar czf - -C ~/cs2/install/game/csgo/$REL ." \
   | tar xzf - -C maps
-git status --short maps/
+# Stage so git re-hashes the files; identical content shows as nothing, real changes show below.
+git add -- maps/
+echo "changed route files:"; git diff --cached --stat -- maps/ | cat
