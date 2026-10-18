@@ -8,11 +8,22 @@ public class TargetBot
     public readonly QAngle Rotation;
     public readonly bool IsCrouching;
 
+    /// <summary>Where a swinging bot runs to once released; null for a static bot.</summary>
+    public readonly SwingSpec? Peek;
+
+    public bool IsSwinger => Peek != null;
+
     public TargetBot(float pX, float pY, float pZ, float aX, float aY, float aZ, bool isCrouching)
+        : this(pX, pY, pZ, aX, aY, aZ, isCrouching, null)
+    {
+    }
+
+    public TargetBot(float pX, float pY, float pZ, float aX, float aY, float aZ, bool isCrouching, SwingSpec? peek)
     {
         Position = new Vector(pX, pY, pZ);
         Rotation = new QAngle(aX, aY, aZ);
         IsCrouching = isCrouching;
+        Peek = peek;
     }
 }
 
@@ -153,13 +164,23 @@ public class PrefirePractice
         w = s.Split(Delimiters);
         Player = new TargetBot(Convert.ToSingle(w[0]), Convert.ToSingle(w[1]), Convert.ToSingle(w[2]), Convert.ToSingle(w[3]), Convert.ToSingle(w[4]), Convert.ToSingle(w[5]), false);
 
+        var lineNumber = 3;
         while ((s = sr.ReadLine()) != null)
         {
+            lineNumber++;
             w = s.Split(Delimiters);
             
             // A line with 7 segments defines a target bot. Comments will be ignored.
+            // An optional "peek x y z [trigger d]" after the crouch flag makes it a swinging bot.
             if (w.Length >= 7)
-                Targets.Add(new TargetBot(Convert.ToSingle(w[0]), Convert.ToSingle(w[1]), Convert.ToSingle(w[2]), Convert.ToSingle(w[3]), Convert.ToSingle(w[4]), Convert.ToSingle(w[5]), Convert.ToBoolean(w[6])));
+            {
+                SwingSpec? peek = null;
+                if (SwingSpec.TryParse(w, 7, out var spec, out var error))
+                    peek = spec;
+                else if (error != null)
+                    Console.WriteLine($"[Freefrag] {map}/{practice} line {lineNumber}: {error}; treating the bot as static.");
+                Targets.Add(new TargetBot(Convert.ToSingle(w[0]), Convert.ToSingle(w[1]), Convert.ToSingle(w[2]), Convert.ToSingle(w[3]), Convert.ToSingle(w[4]), Convert.ToSingle(w[5]), Convert.ToBoolean(w[6]), peek));
+            }
             
             // A line with 3 real numbers defines a joint point of the guiding line.
             if (w.Length == 3)
