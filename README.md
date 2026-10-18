@@ -10,7 +10,7 @@ Klitch's Freefrag is a fork of [OpenPrefirePrac](https://github.com/lengran/Open
 
 ### Installation
 
-Download [the latest release files](https://github.com/largepelotas/OpenPrefirePrac/releases) and extract all files into "**game/csgo/addons/counterstrikesharp/plugins/Freefrag/**".
+Download [the latest release files](https://github.com/largepelotas/Freefrag/releases) and extract all files into "**game/csgo/addons/counterstrikesharp/plugins/Freefrag/**".
 
 To install the latest version of CounterStrikeSharp, please refer to this [guide](https://docs.cssharp.dev/docs/guides/getting-started.html).
 

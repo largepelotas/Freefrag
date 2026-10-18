@@ -19,7 +19,7 @@ public class Freefrag : BasePlugin
     public override string ModuleName => "Freefrag";
     public override string ModuleVersion => "0.1.55";
     public override string ModuleAuthor => "Klitch";
-    public override string ModuleDescription => "Klitch's Freefrag: prefire practice for CS2, a fork of OpenPrefirePrac by Lengran. https://github.com/largepelotas/OpenPrefirePrac";
+    public override string ModuleDescription => "Klitch's Freefrag: prefire practice for CS2, a fork of OpenPrefirePrac by Lengran. https://github.com/largepelotas/Freefrag";
 
     private readonly Dictionary<int, PlayerStatus> _playerStatuses = new();         // Key: slot of player
     
