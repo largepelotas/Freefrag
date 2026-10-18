@@ -14,6 +14,10 @@ public class DefaultConfig
 
     public int Jitter { get; set; } = 0;
 
+    public int HeadshotOnly { get; set; } = 0;
+
+    public int Xray { get; set; } = 0;
+
     /*
      * 0 = disabled.
      * 1 = css based aim lock.
@@ -86,6 +90,16 @@ public class DefaultConfig
                     Jitter = jsonConfig.Jitter;
                 }
 
+                if (jsonConfig.HeadshotOnly > -1 && jsonConfig.HeadshotOnly < 2)
+                {
+                    HeadshotOnly = jsonConfig.HeadshotOnly;
+                }
+
+                if (jsonConfig.Xray > -1 && jsonConfig.Xray < 2)
+                {
+                    Xray = jsonConfig.Xray;
+                }
+
                 if (jsonConfig.BotAimLock > -1 && jsonConfig.BotAimLock < 3)
                 {
                     BotAimLock = jsonConfig.BotAimLock;
@@ -96,7 +110,7 @@ public class DefaultConfig
                     EquipPlayer = jsonConfig.EquipPlayer;
                 }
 
-                Console.WriteLine($"[OpenPrefirePrac] Using default settings: Difficulty = {Difficulty}, TrainingMode = {TrainingMode}, BotWeapon = {BotWeapon}, PlayerGun = {PlayerGun}, Jitter = {Jitter}, BotAimLock = {BotAimLock}, EquipPlayer = {EquipPlayer}");
+                Console.WriteLine($"[OpenPrefirePrac] Using default settings: Difficulty = {Difficulty}, TrainingMode = {TrainingMode}, BotWeapon = {BotWeapon}, PlayerGun = {PlayerGun}, Jitter = {Jitter}, HeadshotOnly = {HeadshotOnly}, Xray = {Xray}, BotAimLock = {BotAimLock}, EquipPlayer = {EquipPlayer}");
             }
             catch (System.Exception)
             {

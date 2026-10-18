@@ -59,6 +59,9 @@ public class PlayerStatus
     public int AutoSkipDeaths = 0;
     public int DeathsOnRoute = 0;
     public int PendingRoute = -1;
+    public bool HeadshotOnly = false;
+    public bool Xray = false;
+    public readonly Dictionary<int, List<int>> GlowEntities = new();         // bot slot -> entity indices of its glow props
 
     public PlayerStatus(DefaultConfig defaultConfig)
     {
@@ -67,6 +70,8 @@ public class PlayerStatus
         BotWeapon = defaultConfig.BotWeapon;
         PlayerGun = defaultConfig.PlayerGun;
         Jitter = defaultConfig.Jitter;
+        HeadshotOnly = defaultConfig.HeadshotOnly == 1;
+        Xray = defaultConfig.Xray == 1;
     }
 
     public PlayerStatus()

@@ -26,6 +26,10 @@
     "PlayerGun": "ak",
     // Bot spawn offset in units (0-64).
     "Jitter": 0,
+    // Headshot-only: 1 = body shots do no damage to bots. 0 = off.
+    "HeadshotOnly": 0,
+    // X-ray: 1 = bots are outlined through walls (only for you). 0 = off.
+    "Xray": 0,
     // Aim lock for bots:
     //   0: CS2's native bot behavior. It works in a consistant manner but is less powerful.
     //   1: CSS based aim lock: Bots always aim at players' heads. But this may conflict with CS2's native bot logic, causing bots to not react under certain circumstances.

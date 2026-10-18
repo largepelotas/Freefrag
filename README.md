@@ -41,6 +41,8 @@ There are also some shortcut commands you can use.
   - !prefire jitter [0-64]: Set bot spawn offset.
   - !prefire repeat [n/inf/off]: Repeat the current route.
   - !prefire autoskip [n/off]: Skip route after deaths.
+  - !prefire hs [on/off]: Headshot-only damage.
+  - !prefire xray [on/off]: Outline bots through walls.
   - !prefire lang [en/pt/zh]: Set language. en for English, pt para português, 中文选择 zh。
   - !prefire exit: Stop practicing.
 
@@ -78,6 +80,12 @@ Explanation of values:
 - EquipPlayer:
   - 0: Disabled. To avoid interfering with other weapon related plugins
   - 1: Enabled (default). Players will be equipped with AK47, deagle and nades every time they respawn.
+- HeadshotOnly:
+  - 0: Off (default).
+  - 1: Body shots do no damage to bots.
+- Xray:
+  - 0: Off (default).
+  - 1: Bots are outlined through walls, visible only to you.
 
 For detailed discussion on bot difficulty, please refer to [this issue](https://github.com/lengran/OpenPrefirePrac/issues/17).
 
