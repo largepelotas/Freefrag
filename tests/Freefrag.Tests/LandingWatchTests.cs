@@ -310,6 +310,30 @@ public class LandingWatchDiagnosticsTests
     }
 
     [Fact]
+    public void NeverMovedOnlyWhenNoSampleShowedMotion()
+    {
+        // A bot the engine never simulated: same Z every tick, no vertical speed.
+        var still = new LandingWatch(100, 32, settleTicks: 2, stableTicks: 3);
+        for (int t = 100; t <= 104; t++) still.Tick(t, 81.03f, 0f, false);
+        Assert.True(still.NeverMoved(81.03f));
+
+        // Lifted out of the floor on the first simulated tick, then at rest: it moved.
+        var lifted = new LandingWatch(100, 32, settleTicks: 2, stableTicks: 3);
+        lifted.Tick(100, 160.03f, 0f, false);
+        for (int t = 101; t <= 104; t++) lifted.Tick(t, 161.03f, 0f, false);
+        Assert.False(lifted.NeverMoved(161.03f));
+
+        // Fell and landed back at the start height: speed was seen, so it moved.
+        var fell = new LandingWatch(100, 32, settleTicks: 2, stableTicks: 3);
+        fell.Tick(100, 10f, 0f, false);
+        fell.Tick(101, 9.8f, -12.5f, false);
+        for (int t = 102; t <= 105; t++) fell.Tick(t, 10f, 0f, false);
+        Assert.False(fell.NeverMoved(10f));
+
+        Assert.False(new LandingWatch(100, 32).NeverMoved(5f));
+    }
+
+    [Fact]
     public void FirstZIsNaNBeforeAnySample()
     {
         var w = new LandingWatch(100, 32);

@@ -48,15 +48,9 @@ public class Freefrag : BasePlugin
     private ScoreRepository? _scores;
 
     private readonly BotRequestQueue _botRequests = new();        // One player's bots spawn at a time; see BotRequestQueue.
-    // Diagnostics (temporary, 2026-10-18): true holds every landing watch open to its 32-tick deadline so the
-    // logged Z trace shows whether a teleported bot ever falls; false restores the settle test.
-    private const bool LandingDiagnosticsHold = true;
-    private const float LandingDiagnosticsLift = 16f;
-    private const bool LandingDiagnosticsDrop = true;    // hand a never-moved bot to MOVETYPE_FLYGRAVITY instead of freezing it, once
-    private const bool LandingDiagnosticsPulse = false;   // flip the duck state once after the teleport to wake the bot's movement    // units above the target to teleport to; 0 restores normal placement
     private readonly Dictionary<int, LandingWatch> _landingWatches = new();
-    private readonly HashSet<int> _landingDropPhase = new();              // Diagnostic: bots given MOVETYPE_FLYGRAVITY after never moving; second watch running.
     private readonly HashSet<int> _landingTimeoutLogged = new();              // Owner slots whose current route start already logged a landing timeout.
+    private readonly HashSet<(string Route, int Target)> _landingNeverMovedLogged = new();   // Route targets already reported as never simulated; cleared on map start.              // Owner slots whose current route start already logged a landing timeout.
     private const uint FL_ONGROUND = 1u << 0;
 
     private const float BotSpawnInterval = 0.1f;
@@ -354,7 +348,6 @@ public class Freefrag : BasePlugin
             CancelBotAddTimers(ownerSlot);
         }
         _landingWatches.Clear();
-        _landingDropPhase.Clear();
         foreach (var botSlot in _ownerOfBots.Keys.ToList())
         {
             KickBot(botSlot);
@@ -411,7 +404,6 @@ public class Freefrag : BasePlugin
             status.Bots.Clear();
         }
         _landingWatches.Clear();
-        _landingDropPhase.Clear();
 
         UnregisterCommand();
         _screenMenu?.Clear();
@@ -577,6 +569,7 @@ public class Freefrag : BasePlugin
             status.Beams.Clear();
             status.CompletedRoutes.Clear();     // route names are per map
         }
+        _landingNeverMovedLogged.Clear();       // report each bad route line once per map load
         _glowCount = 0;
 
         // load practices available in current map, from corresponding map directory.
@@ -660,10 +653,13 @@ public class Freefrag : BasePlugin
                     AddTimer(0.55f, () =>
                     {
                         if (!StillOwned()) return;
-                        // Diagnostic experiment (2026-10-18): teleport above the target to see whether an idle bot ever falls.
-                        var teleportTo = LandingDiagnosticsLift == 0f ? position : new Vector(position.X, position.Y, position.Z + LandingDiagnosticsLift);
-                        MovePlayer(playerOrBot, target.IsCrouching, teleportTo, target.Rotation);
-                        _landingWatches[playerOrBot.Slot] = new LandingWatch(Server.TickCount, stableTicks: LandingDiagnosticsHold ? LandingWatch.ZTraceCap : LandingWatch.DefaultStableTicks) { TargetZ = position.Z };
+                        MovePlayer(playerOrBot, target.IsCrouching, position, target.Rotation);
+                        _landingWatches[playerOrBot.Slot] = new LandingWatch(Server.TickCount)
+                        {
+                            TargetZ = position.Z,
+                            RouteName = _practices[practiceIndex].PracticeName,
+                            TargetIndex = _playerStatuses[ownerSlot].EnabledTargets[targetNo],
+                        };
                     });
                     AddTimer(0.6f, () => { if (StillOwned()) ApplyGlow(ownerSlot, playerOrBot); });
                     
@@ -1558,17 +1554,6 @@ public class Freefrag : BasePlugin
         if (player.IsBot)
         {
             var movementService = new CCSPlayer_MovementServices(player.PlayerPawn.Value.MovementServices!.Handle);
-            if (LandingDiagnosticsPulse)
-            {
-                // Diagnostic experiment (2026-10-18): a duck-state change seems to be what makes the engine simulate an
-                // idle bot after a teleport. Flip the state the wrong way first; the timers below set the right one.
-                AddTimer(0.02f, () =>
-                {
-                    if (!player.IsValid || player.PlayerPawn.Value?.Bot == null) return;
-                    movementService.DuckAmount = crouch ? 0 : 1;
-                    player.PlayerPawn.Value.Bot.IsCrouching = !crouch;
-                });
-            }
             if (crouch)
             {
                 AddTimer(0.05f, () => movementService.DuckAmount = 1);
@@ -3910,7 +3895,6 @@ public class Freefrag : BasePlugin
     private void KickBot(int botSlot)
     {
         _landingWatches.Remove(botSlot);
-        _landingDropPhase.Remove(botSlot);
 
         // The ownership records are dropped here, synchronously, even though the kick itself happens
         // later in the engine: callers (FinishRoute, the remaining-targets count) need Bots accurate
@@ -4111,24 +4095,15 @@ public class Freefrag : BasePlugin
                     var zDelta = float.IsNaN(originZ) ? "?" : (originZ - watch.TargetZ).ToString("F2");
                     Console.WriteLine($"[Freefrag] Bot {watchedBot.PlayerName} never reported ground contact within {LandingWatch.DefaultDeadlineTicks} ticks, freezing anyway (pawn flags {watchedPawn.Flags}, move type {watchedPawn.MoveType}, groundEntity valid {watchedPawn.GroundEntity?.IsValid ?? false}, Z delta to target {zDelta}).");
                 }
-                // Landing diagnostics (temporary, 2026-10-18): one line per bot so a floating bot can be matched to its
-                // target. "first z" is the pawn's Z on the first sample after the teleport, "now" at the verdict.
-                // max|vz| 0 with first z == now means the pawn never moved after the teleport.
-                Console.WriteLine($"[Freefrag] Landing: {watchedBot.PlayerName} {watch.Reason} after {watch.TicksTaken} ticks, target z {watch.TargetZ:F2}, first z {watch.FirstZ:F2}, now {originZ:F2}, max|vz| {watch.MaxAbsVz:F1}, flags {watchedPawn.Flags}, ground {(watchedPawn.Flags & FL_ONGROUND) != 0}/{watchedPawn.GroundEntity?.IsValid ?? false}/{watchedPawn.OnGroundLastTick}, z trace [{string.Join(" ", watch.ZTrace.Select(zz => zz.ToString("F2")))}].");
-                // Diagnostic experiment (2026-10-18): a pawn that never moved (off the nav mesh, no bot movement) is
-                // handed to the engine's own gravity instead of being frozen, and watched a second time.
-                var neverMoved = watch.MaxAbsVz == 0f && !float.IsNaN(watch.FirstZ) && watch.FirstZ == originZ;
-                if (LandingDiagnosticsDrop && neverMoved && _landingDropPhase.Add(watchSlot))
+                // A pawn that never moved at all is one the engine never simulated: CS2 bots only run their
+                // movement (and with it gravity and the step up out of the floor) from the bot AI, and a bot
+                // placed off the nav mesh runs none. It sits exactly at the file's coordinates, floating or sunk
+                // if those are off. Nothing server-side lands it (MOVETYPE_FLYGRAVITY plus a push was tried on
+                // 2026-10-18 and the pawn did not move), so name the route line for the author, once per map load.
+                if (watch.NeverMoved(originZ) && _landingNeverMovedLogged.Add((watch.RouteName, watch.TargetIndex)))
                 {
-                    watchedPawn.MoveType = MoveType_t.MOVETYPE_FLYGRAVITY;
-                    Schema.SetSchemaValue(watchedPawn.Handle, "CBaseEntity", "m_nActualMoveType", (int)MoveType_t.MOVETYPE_FLYGRAVITY);
-                    Utilities.SetStateChanged(watchedPawn, "CBaseEntity", "m_MoveType");
-                    watchedPawn.Teleport(null, null, new Vector(0, 0, -50));
-                    Console.WriteLine($"[Freefrag] Drop: {watchedBot.PlayerName} never moved; set MOVETYPE_FLYGRAVITY at z {originZ:F2}, watching again.");
-                    _landingWatches[watchSlot] = new LandingWatch(Server.TickCount, stableTicks: LandingWatch.ZTraceCap) { TargetZ = watch.TargetZ };
-                    continue;
+                    Console.WriteLine($"[Freefrag] Route {watch.RouteName} target {watch.TargetIndex + 1} (z {watch.TargetZ:F2}): the bot never moved after its teleport, so the spot is probably off the nav mesh and it sits exactly where the file puts it. Re-place it in game with !freefrag addbot and drop the old line.");
                 }
-                _landingDropPhase.Remove(watchSlot);
                 FreezeBot(watchedBot);
             }
         }

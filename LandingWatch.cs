@@ -37,6 +37,16 @@ public sealed class LandingWatch
 
     /// <summary>Z of the teleport target; only used to make the timeout log informative.</summary>
     public float TargetZ { get; init; }
+    /// <summary>Route and target index the watched bot was placed for; only used in log lines.</summary>
+    public string RouteName { get; init; } = "";
+    public int TargetIndex { get; init; } = -1;
+
+    /// <summary>
+    /// True when the pawn never moved from its first sample: no vertical speed in any sample and the
+    /// current Z equals the first one. On the live server that means the engine never simulated the
+    /// pawn at all (a bot off the nav mesh), so it sits exactly where the teleport put it.
+    /// </summary>
+    public bool NeverMoved(float currentZ) => MaxAbsVz == 0f && !float.IsNaN(FirstZ) && FirstZ == currentZ;
 
     /// <summary>How the watch finished; None while Pending.</summary>
     public LandingReason Reason => _reason;
