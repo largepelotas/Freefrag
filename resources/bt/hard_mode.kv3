@@ -82,11 +82,49 @@
 										}
 									}
 								},
-							// Else: attack if we see an enemy
+							// Else: attack if we see an enemy; a walking bot with no enemy runs to the nearest swing marker
 							{
-								type = "subtree"
-								file = "scripts/ai/modules/bt_attack.kv3"
-								name = "Attack"
+								type = "selector"
+								children =
+								[
+									{
+										type = "subtree"
+										file = "scripts/ai/modules/bt_attack.kv3"
+										name = "Attack"
+									},
+									{
+										type = "decorator_sensor"
+										shape =
+										{
+											type = "sensor_shape_sphere"
+											radius = 2000
+										}
+										entity_type_filter = "CLASSNAME"
+										class_name = "info_target"
+										output = "SwingMarkers"
+										child =
+										{
+											type = "decorator_picker_nearby"
+											input = "SwingMarkers"
+											cutoff_distance = 2000
+											child =
+											{
+												type = "condition_is_empty"
+												input = "SwingMarkers"
+												negated = 1
+												child =
+												{
+													type = "action_move_to"
+													destination = "SwingMarkers"
+													movement_type = "BT_ACTION_MOVETO_RUN"
+													route_type = "BT_ACTION_MOVETO_FASTEST_ROUTE"
+													arrival_epsilon = 20
+													auto_look_adjust = 1
+												}
+											}
+										}
+									}
+								]
 							}
 						]
 					}
