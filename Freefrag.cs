@@ -45,6 +45,8 @@ public class Freefrag : BasePlugin
     private ScoreRepository? _scores;
 
     private readonly BotRequestQueue _botRequests = new();        // One player's bots spawn at a time; see BotRequestQueue.
+    private readonly Dictionary<int, LandingWatch> _landingWatches = new();   // Key: bot slot. Bots waiting to touch ground before FreezeBot.
+    private const uint FL_ONGROUND = 1u << 0;
 
     private const float BotSpawnInterval = 0.1f;
     private const float BotSpawnTimeout = 8f;                      // Seconds after the last bot_add before an unfulfilled request is dropped.
@@ -350,8 +352,6 @@ public class Freefrag : BasePlugin
                     _playerStatuses[ownerSlot].Progress++;
                     // Console.WriteLine($"[Freefrag] DEBUG: Update progress to {_playerStatuses[owner].Progress}.");
 
-                    AddTimer(0.5f, () => FreezeBot(playerOrBot));
-
                     var target = _practices[practiceIndex].Targets[_playerStatuses[ownerSlot].EnabledTargets[targetNo]];
                     var position = target.Position;
                     if (_playerStatuses[ownerSlot].Jitter > 0)
@@ -359,7 +359,11 @@ public class Freefrag : BasePlugin
                         var (dx, dy) = SpawnJitter.Offset(_playerStatuses[ownerSlot].Jitter, new Random());
                         position = new Vector(position.X + dx, position.Y + dy, position.Z);
                     }
-                    AddTimer(0.55f, () => MovePlayer(playerOrBot, target.IsCrouching, position, target.Rotation));
+                    AddTimer(0.55f, () =>
+                    {
+                        MovePlayer(playerOrBot, target.IsCrouching, position, target.Rotation);
+                        _landingWatches[playerOrBot.Slot] = new LandingWatch(Server.TickCount);
+                    });
                     AddTimer(0.6f, () => ApplyGlow(ownerSlot, playerOrBot));
                     
 
@@ -465,6 +469,7 @@ public class Freefrag : BasePlugin
                 // For managed bots
                 int ownerSlot = _ownerOfBots[playerOrBot.Slot];
                 RemoveGlow(ownerSlot, playerOrBot.Slot);
+                _landingWatches.Remove(playerOrBot.Slot);
                 var targetNo = _playerStatuses[ownerSlot].Progress;
                 var practiceIndex = _playerStatuses[ownerSlot].PracticeIndex;
 
@@ -1021,6 +1026,9 @@ public class Freefrag : BasePlugin
 
     private void ResetBots(int slot)
     {
+        foreach (var watchedBot in _playerStatuses[slot].Bots)
+            _landingWatches.Remove(watchedBot);
+
         _playerStatuses[slot].Progress = 0;
 
         List<int> botsToDelete = new List<int>();
@@ -1201,6 +1209,12 @@ public class Freefrag : BasePlugin
         player.PlayerPawn.Value.Teleport(pos, ang, Vector.Zero);
     }
 
+    // MOVETYPE_VPHYSICS halts all simulation on the pawn (no gravity, no movement), so it must only
+    // be applied once the bot has landed. The landing watch in OnTickHandler does that: it waits for
+    // ground contact after the route teleport and then calls this. A pawn frozen while FL_ONGROUND is
+    // set keeps that flag, so weapon accuracy is the standing value rather than the airborne one.
+    // MOVETYPE_NONE was considered as an alternative, but VPHYSICS is the known-good state that still
+    // lets bots aim and fire, so it stays.
     private void FreezeBot(CCSPlayerController? bot)
     {
         // Console.WriteLine($"[Freefrag] DEBUG: Trying to freeze a bot.");
@@ -1210,6 +1224,9 @@ public class Freefrag : BasePlugin
         )
         {
             // Console.WriteLine($"[Freefrag] DEBUG: Bot {bot.PlayerName} freezed.");
+
+            // Kill any residual velocity first; VPHYSICS would otherwise keep it.
+            bot.PlayerPawn.Value.Teleport(null, null, Vector.Zero);
 
             // bot.PlayerPawn.Value.MoveType = MoveType_t.MOVETYPE_OBSOLETE;
             bot.PlayerPawn.Value.MoveType = MoveType_t.MOVETYPE_VPHYSICS;
@@ -3021,6 +3038,7 @@ public class Freefrag : BasePlugin
 
     private void KickBot(int botSlot)
     {
+        _landingWatches.Remove(botSlot);
 
         if (_ownerOfBots.ContainsKey(botSlot))
         {
@@ -3140,7 +3158,42 @@ public class Freefrag : BasePlugin
             }
         }
 
-        if (_defaultPlayerSettings!.BotAimLock == 1)
+        // Landing pass: a bot teleported to its route coordinate may be in the air, so it is only
+        // frozen once it reports ground contact (or the watch times out).
+        if (_landingWatches.Count > 0)
+        {
+            foreach (var (watchSlot, watch) in _landingWatches.ToArray())
+            {
+                var watchedBot = Utilities.GetPlayerFromSlot(watchSlot);
+                if (watchedBot == null || !watchedBot.IsValid || !watchedBot.PawnIsAlive || watchedBot.PlayerPawn.Value == null)
+                {
+                    _landingWatches.Remove(watchSlot);
+                    continue;
+                }
+
+                var watchedPawn = watchedBot.PlayerPawn.Value;
+                bool grounded = (watchedPawn.Flags & FL_ONGROUND) != 0 || (watchedPawn.GroundEntity?.IsValid ?? false);
+
+                var verdict = watch.Tick(grounded, Server.TickCount);
+                if (verdict == LandingVerdict.Pending)
+                {
+                    continue;
+                }
+
+                _landingWatches.Remove(watchSlot);
+                if (verdict == LandingVerdict.TimedOut)
+                {
+                    Console.WriteLine($"[Freefrag] Bot {watchedBot.PlayerName} never reported ground contact within {LandingWatch.DefaultDeadlineTicks} ticks, freezing anyway.");
+                }
+                FreezeBot(watchedBot);
+            }
+        }
+
+        // Runs every tick because one atan2 per bot per tick is negligible, and a lower rate makes the
+        // bot's view step visibly when the player strafes. At level 2 the behaviour tree aims at the
+        // same point once it sees the player, so the two do not fight. Level 0 stays CS2-native and is
+        // the way to switch facing off.
+        if (_defaultPlayerSettings!.BotAimLock >= 1)
         {
             foreach (int playerSlot in _playerStatuses.Keys)
             {
@@ -3166,13 +3219,10 @@ public class Freefrag : BasePlugin
                     Vector botEyePosition = new Vector(bot.PlayerPawn.Value.AbsOrigin!.X, bot.PlayerPawn.Value.AbsOrigin!.Y, bot.PlayerPawn.Value.AbsOrigin!.Z + bot.PlayerPawn.Value.ViewmodelOffsetZ);
 
                     // calculate angle
-                    float deltaX = ownerEyePos.X - botEyePosition.X;
-                    float deltaY = ownerEyePos.Y - botEyePosition.Y;
-                    float deltaZ = ownerEyePos.Z - botEyePosition.Z;
-                    double yaw = 180 * Math.Atan2(deltaY, deltaX) / Math.PI;
-                    double tmp = Math.Sqrt(deltaX * deltaX + deltaY * deltaY);
-                    double pitch= 180 * Math.Atan2(-1 * deltaZ, tmp) / Math.PI;
-                    QAngle angle = new QAngle((float)pitch, (float)yaw, 0);
+                    var (pitch, yaw) = BotFacing.AnglesTo(
+                        botEyePosition.X, botEyePosition.Y, botEyePosition.Z,
+                        ownerEyePos.X, ownerEyePos.Y, ownerEyePos.Z);
+                    QAngle angle = new QAngle(pitch, yaw, 0);
 
                     Server.NextFrame(() => {
                         if (pitch < 15 && pitch > -15)

@@ -53,8 +53,8 @@ public class DefaultConfig
 
     /*
      * 0 = disabled.
-     * 1 = css based aim lock.
-     * 2 = behavior tree based aim lock (hard).
+     * 1 = face and track the owning player every tick (plugin aim lock).
+     * 2 = same tracking plus the hard_mode behaviour tree for firing.
     */
     public int BotAimLock {get; set; } = 1;
 
