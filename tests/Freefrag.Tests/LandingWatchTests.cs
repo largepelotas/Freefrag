@@ -293,6 +293,20 @@ public class LandingWatchDiagnosticsTests
         Assert.Equal(10f, w.FirstZ);
         Assert.Equal(25f, w.MaxAbsVz);
         Assert.Equal(6, w.TicksTaken);
+        Assert.Equal(new[] { 10f, 10f, 9f, 8.5f, 8.5f, 8.5f, 8.5f }, w.ZTrace);
+    }
+
+    [Fact]
+    public void HoldingTheSettleTestOpenRunsToTheDeadline()
+    {
+        // Diagnostic hold: a stable-tick requirement longer than the deadline means the watch always
+        // times out, so the trace shows what the pawn does over the whole window before it is frozen.
+        var w = new LandingWatch(100, 32, settleTicks: 2, stableTicks: 40);
+        LandingVerdict v = LandingVerdict.Pending;
+        for (int t = 100; t <= 132; t++)
+            v = w.Tick(t, 5f, 0f, false);
+        Assert.Equal(LandingVerdict.TimedOut, v);
+        Assert.Equal(33, w.ZTrace.Count);
     }
 
     [Fact]

@@ -48,6 +48,10 @@ public sealed class LandingWatch
     public float MaxAbsVz { get; private set; }
     /// <summary>Ticks between the start tick and the last Tick call.</summary>
     public int TicksTaken { get; private set; }
+    /// <summary>Z of every sample, in order, capped at <see cref="ZTraceCap"/> entries.</summary>
+    public IReadOnlyList<float> ZTrace => _zTrace;
+    public const int ZTraceCap = 40;
+    private readonly List<float> _zTrace = new();
 
     public LandingWatch(int startTick, int deadlineTicks = DefaultDeadlineTicks, int settleTicks = DefaultSettleTicks, int stableTicks = DefaultStableTicks)
     {
@@ -85,6 +89,7 @@ public sealed class LandingWatch
 
         TicksTaken = tick - _startTick;
         if (float.IsNaN(FirstZ)) FirstZ = z;
+        if (_zTrace.Count < ZTraceCap) _zTrace.Add(z);
         if (!float.IsNaN(vz) && MathF.Abs(vz) > MaxAbsVz) MaxAbsVz = MathF.Abs(vz);
 
         bool pastSettleWindow = tick >= _startTick + _settleTicks;

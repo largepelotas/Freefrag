@@ -48,6 +48,9 @@ public class Freefrag : BasePlugin
     private ScoreRepository? _scores;
 
     private readonly BotRequestQueue _botRequests = new();        // One player's bots spawn at a time; see BotRequestQueue.
+    // Diagnostics (temporary, 2026-10-18): true holds every landing watch open to its 32-tick deadline so the
+    // logged Z trace shows whether a teleported bot ever falls; false restores the settle test.
+    private const bool LandingDiagnosticsHold = true;
     private readonly Dictionary<int, LandingWatch> _landingWatches = new();   // Key: bot slot. Bots waiting to touch ground before FreezeBot.
     private readonly HashSet<int> _landingTimeoutLogged = new();              // Owner slots whose current route start already logged a landing timeout.
     private const uint FL_ONGROUND = 1u << 0;
@@ -652,7 +655,7 @@ public class Freefrag : BasePlugin
                     {
                         if (!StillOwned()) return;
                         MovePlayer(playerOrBot, target.IsCrouching, position, target.Rotation);
-                        _landingWatches[playerOrBot.Slot] = new LandingWatch(Server.TickCount) { TargetZ = position.Z };
+                        _landingWatches[playerOrBot.Slot] = new LandingWatch(Server.TickCount, stableTicks: LandingDiagnosticsHold ? LandingWatch.ZTraceCap : LandingWatch.DefaultStableTicks) { TargetZ = position.Z };
                     });
                     AddTimer(0.6f, () => { if (StillOwned()) ApplyGlow(ownerSlot, playerOrBot); });
                     
@@ -4091,7 +4094,7 @@ public class Freefrag : BasePlugin
                 // Landing diagnostics (temporary, 2026-10-18): one line per bot so a floating bot can be matched to its
                 // target. "first z" is the pawn's Z on the first sample after the teleport, "now" at the verdict.
                 // max|vz| 0 with first z == now means the pawn never moved after the teleport.
-                Console.WriteLine($"[Freefrag] Landing: {watchedBot.PlayerName} {watch.Reason} after {watch.TicksTaken} ticks, target z {watch.TargetZ:F2}, first z {watch.FirstZ:F2}, now {originZ:F2}, max|vz| {watch.MaxAbsVz:F1}, flags {watchedPawn.Flags}, ground {(watchedPawn.Flags & FL_ONGROUND) != 0}/{watchedPawn.GroundEntity?.IsValid ?? false}/{watchedPawn.OnGroundLastTick}.");
+                Console.WriteLine($"[Freefrag] Landing: {watchedBot.PlayerName} {watch.Reason} after {watch.TicksTaken} ticks, target z {watch.TargetZ:F2}, first z {watch.FirstZ:F2}, now {originZ:F2}, max|vz| {watch.MaxAbsVz:F1}, flags {watchedPawn.Flags}, ground {(watchedPawn.Flags & FL_ONGROUND) != 0}/{watchedPawn.GroundEntity?.IsValid ?? false}/{watchedPawn.OnGroundLastTick}, z trace [{string.Join(" ", watch.ZTrace.Select(zz => zz.ToString("F2")))}].");
                 FreezeBot(watchedBot);
             }
         }
