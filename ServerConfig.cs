@@ -10,6 +10,14 @@ public class DefaultConfig
 
     public int BotWeapon {get; set; } = 0;
 
+    public string PlayerGun { get; set; } = "ak";
+
+    public int Jitter { get; set; } = 0;
+
+    public int HeadshotOnly { get; set; } = 0;
+
+    public int Xray { get; set; } = 0;
+
     /*
      * 0 = disabled.
      * 1 = css based aim lock.
@@ -66,9 +74,30 @@ public class DefaultConfig
                     TrainingMode = jsonConfig.TrainingMode;
                 }
                 
-                if (jsonConfig.BotWeapon > -1 && jsonConfig.BotWeapon < 5)
+                if (jsonConfig.BotWeapon > -1 && jsonConfig.BotWeapon < 8)
                 {
                     BotWeapon = jsonConfig.BotWeapon;
+                }
+
+                var playerGun = string.IsNullOrEmpty(jsonConfig.PlayerGun) ? null : PlayerLoadout.ParseGun(jsonConfig.PlayerGun);
+                if (playerGun != null)
+                {
+                    PlayerGun = playerGun;
+                }
+
+                if (jsonConfig.Jitter >= 0 && jsonConfig.Jitter <= SpawnJitter.Max)
+                {
+                    Jitter = jsonConfig.Jitter;
+                }
+
+                if (jsonConfig.HeadshotOnly > -1 && jsonConfig.HeadshotOnly < 2)
+                {
+                    HeadshotOnly = jsonConfig.HeadshotOnly;
+                }
+
+                if (jsonConfig.Xray > -1 && jsonConfig.Xray < 2)
+                {
+                    Xray = jsonConfig.Xray;
                 }
 
                 if (jsonConfig.BotAimLock > -1 && jsonConfig.BotAimLock < 3)
@@ -81,7 +110,7 @@ public class DefaultConfig
                     EquipPlayer = jsonConfig.EquipPlayer;
                 }
 
-                Console.WriteLine($"[OpenPrefirePrac] Using default settings: Difficulty = {Difficulty}, TrainingMode = {TrainingMode}, BotWeapon = {BotWeapon}, BotAimLock = {BotAimLock}, EquipPlayer = {EquipPlayer}");
+                Console.WriteLine($"[OpenPrefirePrac] Using default settings: Difficulty = {Difficulty}, TrainingMode = {TrainingMode}, BotWeapon = {BotWeapon}, PlayerGun = {PlayerGun}, Jitter = {Jitter}, HeadshotOnly = {HeadshotOnly}, Xray = {Xray}, BotAimLock = {BotAimLock}, EquipPlayer = {EquipPlayer}");
             }
             catch (System.Exception)
             {

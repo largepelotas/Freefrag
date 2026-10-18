@@ -48,14 +48,30 @@ public class PlayerStatus
      * 2: Bots use AK47.
      * 3: Bots use Scout.
      * 4: Bots use AWP.
+     * 5: Bots use Pistols.
+     * 6: Bots use Eco weapons.
+     * 7: Bots use Force-buy weapons.
      */
     public int BotWeapon = 0;
+    public string PlayerGun = "ak";
+    public int Jitter = 0;
+    public int Repeat = RepeatSetting.Off;
+    public int AutoSkipDeaths = 0;
+    public int DeathsOnRoute = 0;
+    public int PendingRoute = -1;
+    public bool HeadshotOnly = false;
+    public bool Xray = false;
+    public readonly Dictionary<int, List<int>> GlowEntities = new();         // bot slot -> entity indices of its glow props
 
     public PlayerStatus(DefaultConfig defaultConfig)
     {
         HealingMethod = defaultConfig.Difficulty;
         TrainingMode = defaultConfig.TrainingMode;
         BotWeapon = defaultConfig.BotWeapon;
+        PlayerGun = defaultConfig.PlayerGun;
+        Jitter = defaultConfig.Jitter;
+        HeadshotOnly = defaultConfig.HeadshotOnly == 1;
+        Xray = defaultConfig.Xray == 1;
     }
 
     public PlayerStatus()

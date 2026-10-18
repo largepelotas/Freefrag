@@ -53,6 +53,10 @@ public class OpenPrefirePrac : BasePlugin
     private CommandDefinition ?_command;
 
     private CounterStrikeSharp.API.Modules.Timers.Timer ?_timerBroadcastProgress;
+
+    private int _glowCount;                                         // Bots currently wearing an x-ray glow; lets CheckTransmit skip all work when zero.
+
+    private readonly HashSet<string> _hookErrorsLogged = new();     // Error types already reported from engine hooks.
     
     public override void Load(bool hotReload)
     {
@@ -63,6 +67,8 @@ public class OpenPrefirePrac : BasePlugin
         RegisterListener<Listeners.OnClientPutInServer>(OnClientPutInServerHandler);
         RegisterListener<Listeners.OnMapStart>(OnMapStartHandler);
         RegisterListener<Listeners.OnTick>(OnTickHandler);
+        RegisterListener<Listeners.CheckTransmit>(OnCheckTransmit);
+        RegisterListener<Listeners.OnEntityTakeDamagePre>(OnTakeDamage);
 
         _defaultPlayerSettings = new DefaultConfig(ModuleDirectory);
         _defaultPlayerSettings.LoadDefaultSettings();
@@ -79,6 +85,7 @@ public class OpenPrefirePrac : BasePlugin
             _playerCount = 0;
             _playerStatuses.Clear();
             _botRequests.Clear();
+            _glowCount = 0;
             
             // Clear saved convars
             _serverStatus.WarmupStatus = false;
@@ -132,6 +139,14 @@ public class OpenPrefirePrac : BasePlugin
         RemoveListener<Listeners.OnClientPutInServer>(OnClientPutInServerHandler);
         RemoveListener<Listeners.OnMapStart>(OnMapStartHandler);
         RemoveListener<Listeners.OnTick>(OnTickHandler);
+        RemoveListener<Listeners.CheckTransmit>(OnCheckTransmit);
+        RemoveListener<Listeners.OnEntityTakeDamagePre>(OnTakeDamage);
+
+        // Glow props outlive the plugin otherwise; Unload clears the status registers below.
+        foreach (var ownerSlot in _playerStatuses.Keys.ToList())
+        {
+            RemoveAllGlow(ownerSlot);
+        }
 
         if (hotReload)
         {
@@ -243,6 +258,13 @@ public class OpenPrefirePrac : BasePlugin
     {
         _mapName = map;
 
+        // Entities do not survive a map change; stale indices must not be killed or hidden later.
+        foreach (var status in _playerStatuses.Values)
+        {
+            status.GlowEntities.Clear();
+        }
+        _glowCount = 0;
+
         // load practices available in current map, from corresponding map directory.
         _availableMaps.Clear();
         var mapDirectories = new List<string>(Directory.EnumerateDirectories(ModuleDirectory + "/maps"));
@@ -300,37 +322,25 @@ public class OpenPrefirePrac : BasePlugin
 
                     AddTimer(0.5f, () => FreezeBot(playerOrBot));
 
-                    AddTimer(0.55f, () => MovePlayer(playerOrBot,
-                        _practices[practiceIndex].Targets[_playerStatuses[ownerSlot].EnabledTargets[targetNo]]
-                            .IsCrouching,
-                        _practices[practiceIndex].Targets[_playerStatuses[ownerSlot].EnabledTargets[targetNo]].Position,
-                        _practices[practiceIndex].Targets[_playerStatuses[ownerSlot].EnabledTargets[targetNo]]
-                            .Rotation));
+                    var target = _practices[practiceIndex].Targets[_playerStatuses[ownerSlot].EnabledTargets[targetNo]];
+                    var position = target.Position;
+                    if (_playerStatuses[ownerSlot].Jitter > 0)
+                    {
+                        var (dx, dy) = SpawnJitter.Offset(_playerStatuses[ownerSlot].Jitter, new Random());
+                        position = new Vector(position.X + dx, position.Y + dy, position.Z);
+                    }
+                    AddTimer(0.55f, () => MovePlayer(playerOrBot, target.IsCrouching, position, target.Rotation));
+                    AddTimer(0.6f, () => ApplyGlow(ownerSlot, playerOrBot));
                     
 
                     // Give bot weapons
-                    if (_playerStatuses[ownerSlot].BotWeapon > 0)
+                    var items = BotLoadout.ItemsFor(_playerStatuses[ownerSlot].BotWeapon, new Random());
+                    if (items.Count > 0)
                     {
                         SetMoney(playerOrBot, 0);
                         playerOrBot.RemoveWeapons();
-                        switch (_playerStatuses[ownerSlot].BotWeapon)
-                        {
-                            case 1:
-                                playerOrBot.GiveNamedItem("weapon_ump45");
-                                break;
-                            case 2:
-                                playerOrBot.GiveNamedItem("weapon_ak47");
-                                break;
-                            case 3:
-                                playerOrBot.GiveNamedItem("weapon_ssg08");
-                                break;
-                            case 4:
-                                playerOrBot.GiveNamedItem("weapon_awp");
-                                break;
-                            default:
-                                playerOrBot.GiveNamedItem("weapon_ak47");
-                                break;
-                        }
+                        foreach (var item in items)
+                            playerOrBot.GiveNamedItem(item);
                     }
 
                     // Try to increase bot difficulty
@@ -354,8 +364,7 @@ public class OpenPrefirePrac : BasePlugin
 
                         if (owner != null && owner.IsValid && !owner.IsBot && !owner.IsHLTV)
                         {
-                            owner.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(owner, "practice.finish")}");
-                            ExitPrefireMode(ownerSlot);
+                            FinishRoute(owner);
                         }
                     }
                 }
@@ -376,6 +385,21 @@ public class OpenPrefirePrac : BasePlugin
 
             if (_playerStatuses[playerOrBot.Slot].PracticeIndex < 0)
                 return HookResult.Continue;
+
+            if (_playerStatuses[playerOrBot.Slot].PendingRoute > -1)
+            {
+                var pendingRoute = _playerStatuses[playerOrBot.Slot].PendingRoute;
+                _playerStatuses[playerOrBot.Slot].PendingRoute = -1;
+                if (RouteBlockedByOthers(playerOrBot.Slot, pendingRoute))
+                {
+                    // Another player took that route between the death and this respawn. Stay on the current route;
+                    // the same-index path re-adds the bots the death branch skipped and runs SetupPrefireMode.
+                    playerOrBot.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(playerOrBot, "practice.incompatible")}");
+                    pendingRoute = _playerStatuses[playerOrBot.Slot].PracticeIndex;
+                }
+                StartPractice(playerOrBot, pendingRoute);
+                return HookResult.Continue;
+            }
 
             // Console.WriteLine($"[OpenPrefirePrac] DEBUG: Setup player {playerOrBot.PlayerName}.");
             SetupPrefireMode(playerOrBot);
@@ -400,6 +424,7 @@ public class OpenPrefirePrac : BasePlugin
             {
                 // For managed bots
                 int ownerSlot = _ownerOfBots[playerOrBot.Slot];
+                RemoveGlow(ownerSlot, playerOrBot.Slot);
                 var targetNo = _playerStatuses[ownerSlot].Progress;
                 var practiceIndex = _playerStatuses[ownerSlot].PracticeIndex;
 
@@ -461,8 +486,7 @@ public class OpenPrefirePrac : BasePlugin
                     if (_playerStatuses[ownerSlot].Bots.Count == 0)
                     {
                         // Practice finished.
-                        owner.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(owner, "practice.finish")}");
-                        ExitPrefireMode(ownerSlot);
+                        FinishRoute(owner);
                     }
                 }
                 else
@@ -489,8 +513,26 @@ public class OpenPrefirePrac : BasePlugin
             if (!_playerStatuses.ContainsKey(playerOrBot.Slot))
                 return HookResult.Continue;
             
-            var practiceIndex = _playerStatuses[playerOrBot.Slot].PracticeIndex;
-            var numBots = _playerStatuses[playerOrBot.Slot].Bots.Count;
+            var status = _playerStatuses[playerOrBot.Slot];
+            var practiceIndex = status.PracticeIndex;
+            var numBots = status.Bots.Count;
+
+            if (practiceIndex > -1)
+            {
+                status.DeathsOnRoute++;
+                if (status.AutoSkipDeaths > 0 && status.DeathsOnRoute >= status.AutoSkipDeaths)
+                {
+                    var nextRoute = AutoSkip.NextRoute(practiceIndex, _practices.Count, i => RouteBlockedByOthers(playerOrBot.Slot, i));
+                    if (nextRoute != null)
+                    {
+                        status.PendingRoute = nextRoute.Value;
+                        status.DeathsOnRoute = 0;
+                        var practiceName = _translator!.Translate(playerOrBot, "map." + _mapName + "." + _practices[nextRoute.Value].PracticeName);
+                        playerOrBot.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator.Translate(playerOrBot, "practice.autoskip", status.AutoSkipDeaths, practiceName)}");
+                        return HookResult.Continue;
+                    }
+                }
+            }
             
             if (practiceIndex > -1 && numBots < _practices[practiceIndex].NumBots)
             {
@@ -642,6 +684,9 @@ public class OpenPrefirePrac : BasePlugin
         botWeaponMenu.AddMenuOption("AK47", OnBotWeaponChosen);
         botWeaponMenu.AddMenuOption("SSG08", OnBotWeaponChosen);
         botWeaponMenu.AddMenuOption("AWP", OnBotWeaponChosen);
+        botWeaponMenu.AddMenuOption("Pistol", OnBotWeaponChosen);
+        botWeaponMenu.AddMenuOption("Eco", OnBotWeaponChosen);
+        botWeaponMenu.AddMenuOption("Force", OnBotWeaponChosen);
 
         botWeaponMenu.AddMenuOption(_translator!.Translate(player, "mainmenu.close_menu"), OnCloseMenu);
 
@@ -652,26 +697,17 @@ public class OpenPrefirePrac : BasePlugin
 
     public void OnBotWeaponChosen(CCSPlayerController player, ChatMenuOption option)
     {
-        int botWeaponChoice = -1;
-
-        switch (option.Text)
+        var botWeaponChoice = option.Text switch
         {
-            case "UMP-45":
-                botWeaponChoice = 1;
-                break;
-            case "AK47":
-                botWeaponChoice = 2;
-                break;
-            case "SSG08":
-                botWeaponChoice = 3;
-                break;
-            case "AWP":
-                botWeaponChoice = 4;
-                break;
-            default:
-                botWeaponChoice = 0;
-                break;
-        }
+            "UMP-45" => 1,
+            "AK47" => 2,
+            "SSG08" => 3,
+            "AWP" => 4,
+            "Pistol" => 5,
+            "Eco" => 6,
+            "Force" => 7,
+            _ => 0
+        };
 
         SetBotWeapon(player, botWeaponChoice);
 
@@ -703,6 +739,20 @@ public class OpenPrefirePrac : BasePlugin
         {
             RestoreConvars();
         }
+    }
+
+    private void FinishRoute(CCSPlayerController owner)
+    {
+        var status = _playerStatuses[owner.Slot];
+        if (RepeatSetting.ShouldRestart(ref status.Repeat))
+        {
+            owner.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(owner, "practice.repeat", status.Repeat == RepeatSetting.Infinite ? (object)"infinite" : status.Repeat)}");
+            StartPractice(owner, status.PracticeIndex);
+            return;
+        }
+
+        owner.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(owner, "practice.finish")}");
+        ExitPrefireMode(owner.Slot);
     }
 
     private void ResetBots(int slot)
@@ -904,14 +954,9 @@ public class OpenPrefirePrac : BasePlugin
         {
             player.RemoveWeapons();
 
-            // Give weapons and items
-            player.GiveNamedItem("weapon_ak47");
-            player.GiveNamedItem("weapon_deagle");
-            player.GiveNamedItem("weapon_knife");
-            player.GiveNamedItem("weapon_flashbang");
-            player.GiveNamedItem("weapon_flashbang");
-            player.GiveNamedItem("weapon_smokegrenade");
-            player.GiveNamedItem("item_assaultsuit");
+            var gun = _playerStatuses.TryGetValue(player.Slot, out var status) ? status.PlayerGun : "ak";
+            foreach (var item in PlayerLoadout.ItemsFor(gun))
+                player.GiveNamedItem(item);
 
             // Switch to main weapon
             player.ExecuteClientCommand("slot1");
@@ -1578,6 +1623,7 @@ public class OpenPrefirePrac : BasePlugin
             
             _playerCount++;
             _playerStatuses[player.Slot].PracticeIndex = practiceIndex;
+            _playerStatuses[player.Slot].DeathsOnRoute = 0;
             AddTimer(1f, () => CreateGuidingLine(player.Slot));
 
             // Disable incompatible practices.
@@ -1720,28 +1766,93 @@ public class OpenPrefirePrac : BasePlugin
                                 return;
                         }
                     case "bw":
-                        string botWeapon = commandInfo.ArgByIndex(2);
-                        switch (botWeapon)
+                        var botWeapon = BotLoadout.ParseBotWeapon(commandInfo.ArgByIndex(2));
+                        if (botWeapon != null)
                         {
-                            case "rand":
-                                SetBotWeapon(player, 0);
-                                return;
-                            case "ump":
-                                SetBotWeapon(player, 1);
-                                return;
-                            case "ak":
-                                SetBotWeapon(player, 2);
-                                return;
-                            case "sct":
-                                SetBotWeapon(player, 3);
-                                return;
-                            case "awp":
-                                SetBotWeapon(player, 4);
-                                return;
-                            default:
-                                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "weaponmenu.help")}");
-                                return;
+                            SetBotWeapon(player, botWeapon.Value);
+                            return;
                         }
+                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "weaponmenu.help")}");
+                        return;
+                    case "gun":
+                        var gun = PlayerLoadout.ParseGun(commandInfo.ArgByIndex(2));
+                        if (gun != null)
+                        {
+                            _playerStatuses[player.Slot].PlayerGun = gun;
+                            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "gun.set", gun)}");
+                            if (_playerStatuses[player.Slot].PracticeIndex > -1)
+                                EquipPlayer(player);
+                            return;
+                        }
+                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "gun.help")}");
+                        return;
+                    case "jitter":
+                        var jitter = SpawnJitter.Parse(commandInfo.ArgByIndex(2));
+                        if (jitter != null)
+                        {
+                            _playerStatuses[player.Slot].Jitter = jitter.Value;
+                            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "jitter.set", jitter.Value)}");
+                            return;
+                        }
+                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "jitter.help")}");
+                        return;
+                    case "repeat":
+                        var repeat = RepeatSetting.Parse(commandInfo.ArgByIndex(2));
+                        if (repeat != null)
+                        {
+                            _playerStatuses[player.Slot].Repeat = repeat.Value;
+                            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "repeat.set", RepeatSetting.DisplayName(repeat.Value))}");
+                            return;
+                        }
+                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "repeat.help")}");
+                        return;
+                    case "autoskip":
+                        var autoSkip = AutoSkip.Parse(commandInfo.ArgByIndex(2));
+                        if (autoSkip != null)
+                        {
+                            _playerStatuses[player.Slot].AutoSkipDeaths = autoSkip.Value;
+                            _playerStatuses[player.Slot].DeathsOnRoute = 0;
+                            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {(autoSkip.Value == 0 ? _translator!.Translate(player, "autoskip.off") : _translator!.Translate(player, "autoskip.set", autoSkip.Value))}");
+                            return;
+                        }
+                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "autoskip.help")}");
+                        return;
+                    case "hs":
+                        var hsSetting = ToggleSetting.Parse(commandInfo.ArgByIndex(2), _playerStatuses[player.Slot].HeadshotOnly);
+                        if (hsSetting != null)
+                        {
+                            _playerStatuses[player.Slot].HeadshotOnly = hsSetting.Value;
+                            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "hs.set", ToggleSetting.DisplayName(hsSetting.Value))}");
+                            return;
+                        }
+                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "hs.help")}");
+                        return;
+                    case "xray":
+                        var xraySetting = ToggleSetting.Parse(commandInfo.ArgByIndex(2), _playerStatuses[player.Slot].Xray);
+                        if (xraySetting != null)
+                        {
+                            _playerStatuses[player.Slot].Xray = xraySetting.Value;
+                            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "xray.set", ToggleSetting.DisplayName(xraySetting.Value))}");
+                            if (_playerStatuses[player.Slot].PracticeIndex > -1)
+                            {
+                                if (xraySetting.Value)
+                                {
+                                    foreach (var botSlot in _playerStatuses[player.Slot].Bots.ToList())
+                                    {
+                                        var xrayBot = Utilities.GetPlayerFromSlot(botSlot);
+                                        if (xrayBot != null && xrayBot.IsValid && xrayBot.PawnIsAlive)
+                                            ApplyGlow(player.Slot, xrayBot);
+                                    }
+                                }
+                                else
+                                {
+                                    RemoveAllGlow(player.Slot);
+                                }
+                            }
+                            return;
+                        }
+                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "xray.help")}");
+                        return;
                     case "lang":
                         string language = commandInfo.ArgByIndex(2);
                         switch (language)
@@ -1798,24 +1909,7 @@ public class OpenPrefirePrac : BasePlugin
             mainMenu.AddMenuOption(_translator.Translate(player, "mainmenu.mode", currentTrainingMode), OpenModeMenu);
 
             // 5 Bot weapon menu
-            string currentBotWeapon = "";
-            switch (_playerStatuses[player.Slot].BotWeapon)
-            {
-                case 0:
-                    currentBotWeapon = _translator!.Translate(player, "weaponmenu.random");
-                    break;
-                case 1:
-                    currentBotWeapon = "UMP-45";
-                    break;
-                case 2:
-                    currentBotWeapon = "AK47";
-                    break;
-                case 3:
-                    currentBotWeapon = "AWP";
-                    break;
-                default:
-                    break;
-            }
+            string currentBotWeapon = _playerStatuses[player.Slot].BotWeapon == 0 ? _translator!.Translate(player, "weaponmenu.random") : BotLoadout.DisplayName(_playerStatuses[player.Slot].BotWeapon);
             mainMenu.AddMenuOption(_translator!.Translate(player, "mainmenu.bot_weapon", currentBotWeapon), OpenBotWeaponMenu);
 
             // 6 Language menu
@@ -1849,25 +1943,7 @@ public class OpenPrefirePrac : BasePlugin
     {
         _playerStatuses[player.Slot].BotWeapon = botWeapon;
 
-        string weaponName = "";
-        switch (botWeapon)
-        {
-            case 0:
-                weaponName = _translator!.Translate(player, "weaponmenu.random");
-                break;
-            case 1:
-                weaponName = "UMP-45";
-                break;
-            case 2:
-                weaponName = "AK47";
-                break;
-            case 3:
-                weaponName = "SSG08";
-                break;
-            case 4:
-                weaponName = "AWP";
-                break;
-        }
+        string weaponName = botWeapon == 0 ? _translator!.Translate(player, "weaponmenu.random") : BotLoadout.DisplayName(botWeapon);
 
         player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "weaponmenu.set", weaponName)}");
     }
@@ -1900,6 +1976,9 @@ public class OpenPrefirePrac : BasePlugin
 
     private void UnsetPrefireMode(int playerSlot)
     {
+        RemoveAllGlow(playerSlot);
+        _playerStatuses[playerSlot].DeathsOnRoute = 0;
+        _playerStatuses[playerSlot].PendingRoute = -1;
         var previousPracticeNo = _playerStatuses[playerSlot].PracticeIndex;
         if (previousPracticeNo > -1)
         {
@@ -1958,12 +2037,191 @@ public class OpenPrefirePrac : BasePlugin
         }
     }
 
+    private void LogHookErrorOnce(string hookName, System.Exception e)
+    {
+        if (_hookErrorsLogged.Add($"{hookName}:{e.GetType().Name}"))
+        {
+            Console.WriteLine($"[OpenPrefirePrac] Error in {hookName} (further errors of this type are not logged): {e}");
+        }
+    }
+
+    private static CCSPlayerController? ControllerOfPlayerPawn(CEntityInstance? entity)
+    {
+        if (entity == null || entity.DesignerName != "player")
+        {
+            return null;
+        }
+
+        var controller = new CCSPlayerPawn(entity.Handle).OriginalController.Value;
+        return controller != null && controller.IsValid ? controller : null;
+    }
+
+    private HookResult OnTakeDamage(CBaseEntity entity, CTakeDamageInfo info)
+    {
+        try
+        {
+            var controller = ControllerOfPlayerPawn(info.Attacker.Value);
+            if (controller == null || controller.IsBot)
+            {
+                return HookResult.Continue;
+            }
+
+            if (!_playerStatuses.TryGetValue(controller.Slot, out var status) || !status.HeadshotOnly || status.PracticeIndex < 0)
+            {
+                return HookResult.Continue;
+            }
+
+            // Only the attacker's own managed bots are affected: never other humans, unmanaged bots or self-damage.
+            var victim = ControllerOfPlayerPawn(entity);
+            if (victim == null || !_ownerOfBots.TryGetValue(victim.Slot, out var owner) || owner != controller.Slot)
+            {
+                return HookResult.Continue;
+            }
+
+            var hitGroup = info.GetHitGroup();
+            if (hitGroup == HitGroup_t.HITGROUP_HEAD || hitGroup == HitGroup_t.HITGROUP_INVALID)
+            {
+                return HookResult.Continue;
+            }
+
+            info.Damage = 0;
+            return HookResult.Changed;
+        }
+        catch (System.Exception e)
+        {
+            LogHookErrorOnce(nameof(OnTakeDamage), e);
+            return HookResult.Continue;
+        }
+    }
+
+    private void OnCheckTransmit(CCheckTransmitInfoList infoList)
+    {
+        if (_glowCount == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var (info, player) in infoList)
+            {
+                if (player == null)
+                {
+                    continue;
+                }
+
+                foreach (var (ownerSlot, status) in _playerStatuses)
+                {
+                    if (ownerSlot == player.Slot || status.GlowEntities.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    foreach (var indices in status.GlowEntities.Values)
+                    {
+                        foreach (var index in indices)
+                        {
+                            info.TransmitEntities.Remove(index);
+                        }
+                    }
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            LogHookErrorOnce(nameof(OnCheckTransmit), e);
+        }
+    }
+
+    private void ApplyGlow(int ownerSlot, CCSPlayerController bot)
+    {
+        if (!_playerStatuses.TryGetValue(ownerSlot, out var status) || !status.Xray)
+        {
+            return;
+        }
+
+        // The bot may have been killed or kicked during the spawn timer.
+        if (bot == null || !bot.IsValid || !bot.PawnIsAlive || !_ownerOfBots.TryGetValue(bot.Slot, out var botOwner) || botOwner != ownerSlot)
+        {
+            return;
+        }
+
+        var pawn = bot.PlayerPawn.Value;
+        var model = pawn?.CBodyComponent?.SceneNode?.GetSkeletonInstance().ModelState.ModelName;
+        if (pawn == null || string.IsNullOrEmpty(model))
+        {
+            return;
+        }
+
+        RemoveGlow(ownerSlot, bot.Slot);
+
+        var relay = Utilities.CreateEntityByName<CDynamicProp>("prop_dynamic");
+        var glow = Utilities.CreateEntityByName<CDynamicProp>("prop_dynamic");
+        if (relay == null || glow == null)
+        {
+            relay?.AcceptInput("Kill");
+            glow?.AcceptInput("Kill");
+            return;
+        }
+
+        relay.SetModel(model);
+        relay.Spawnflags = 256;
+        relay.RenderMode = RenderMode_t.kRenderNone;
+        relay.DispatchSpawn();
+        relay.AcceptInput("FollowEntity", pawn, relay, "!activator");
+
+        glow.SetModel(model);
+        glow.Spawnflags = 256;
+        glow.DispatchSpawn();
+        glow.AcceptInput("FollowEntity", relay, glow, "!activator");
+        glow.Glow.GlowColorOverride = System.Drawing.Color.FromArgb(255, 255, 60, 60);
+        glow.Glow.GlowRange = 5000;
+        glow.Glow.GlowRangeMin = 0;
+        glow.Glow.GlowTeam = -1;
+        glow.Glow.GlowType = 3;
+
+        status.GlowEntities[bot.Slot] = new List<int> { (int)relay.Index, (int)glow.Index };
+        _glowCount++;
+    }
+
+    private void RemoveGlow(int ownerSlot, int botSlot)
+    {
+        if (!_playerStatuses.TryGetValue(ownerSlot, out var status) || !status.GlowEntities.Remove(botSlot, out var indices))
+        {
+            return;
+        }
+
+        _glowCount = Math.Max(0, _glowCount - 1);
+        foreach (var index in indices)
+        {
+            var entity = Utilities.GetEntityFromIndex<CBaseEntity>(index);
+            if (entity != null && entity.IsValid && entity.DesignerName == "prop_dynamic")
+            {
+                entity.AcceptInput("Kill");
+            }
+        }
+    }
+
+    private void RemoveAllGlow(int ownerSlot)
+    {
+        if (!_playerStatuses.TryGetValue(ownerSlot, out var status) || status.GlowEntities.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var botSlot in status.GlowEntities.Keys.ToList())
+        {
+            RemoveGlow(ownerSlot, botSlot);
+        }
+    }
+
     private void KickBot(int botSlot)
     {
 
         if (_ownerOfBots.ContainsKey(botSlot))
         {
             int ownerSlot = _ownerOfBots[botSlot];
+            RemoveGlow(ownerSlot, botSlot);
             if (_playerStatuses[ownerSlot].Bots.Contains(botSlot))
             {
                 _playerStatuses[ownerSlot].Bots.Remove(botSlot);
