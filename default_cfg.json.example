@@ -30,6 +30,10 @@
     "HeadshotOnly": 0,
     // X-ray: 1 = bots are outlined through walls (only for you). 0 = off.
     "Xray": 0,
+    // Menu type:
+    //   0: Chat menus (type !1-!9 to choose).
+    //   1: WASD menus. Needs the WASDMenuAPI plugin; chat menus are used when it is not installed.
+    "MenuType": 1,
     // Aim lock for bots:
     //   0: CS2's native bot behavior. It works in a consistant manner but is less powerful.
     //   1: CSS based aim lock: Bots always aim at players' heads. But this may conflict with CS2's native bot logic, causing bots to not react under certain circumstances.

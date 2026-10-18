@@ -86,6 +86,9 @@ Explanation of values:
 - Xray:
   - 0: Off (default).
   - 1: Bots are outlined through walls, visible only to you.
+- MenuType:
+  - 0: Chat menus (type !1-!9 to choose).
+  - 1: WASD menus (default). Needs the WASDMenuAPI plugin; chat menus are used when it is not installed.
 
 For detailed discussion on bot difficulty, please refer to [this issue](https://github.com/lengran/OpenPrefirePrac/issues/17).
 

@@ -17,4 +17,11 @@
     <PackageReference Include="MaxMind.GeoIP2" Version="5.2.0" />
     <PackageReference Include="MaxMind.Db" Version="4.1.0" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="WASDSharedAPI">
+      <HintPath>lib/WASDSharedAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
 </Project>
