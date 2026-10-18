@@ -51,6 +51,7 @@ public class Freefrag : BasePlugin
     // Diagnostics (temporary, 2026-10-18): true holds every landing watch open to its 32-tick deadline so the
     // logged Z trace shows whether a teleported bot ever falls; false restores the settle test.
     private const bool LandingDiagnosticsHold = true;
+    private const float LandingDiagnosticsLift = 16f;    // units above the target to teleport to; 0 restores normal placement
     private readonly Dictionary<int, LandingWatch> _landingWatches = new();   // Key: bot slot. Bots waiting to touch ground before FreezeBot.
     private readonly HashSet<int> _landingTimeoutLogged = new();              // Owner slots whose current route start already logged a landing timeout.
     private const uint FL_ONGROUND = 1u << 0;
@@ -654,7 +655,9 @@ public class Freefrag : BasePlugin
                     AddTimer(0.55f, () =>
                     {
                         if (!StillOwned()) return;
-                        MovePlayer(playerOrBot, target.IsCrouching, position, target.Rotation);
+                        // Diagnostic experiment (2026-10-18): teleport above the target to see whether an idle bot ever falls.
+                        var teleportTo = LandingDiagnosticsLift == 0f ? position : new Vector(position.X, position.Y, position.Z + LandingDiagnosticsLift);
+                        MovePlayer(playerOrBot, target.IsCrouching, teleportTo, target.Rotation);
                         _landingWatches[playerOrBot.Slot] = new LandingWatch(Server.TickCount, stableTicks: LandingDiagnosticsHold ? LandingWatch.ZTraceCap : LandingWatch.DefaultStableTicks) { TargetZ = position.Z };
                     });
                     AddTimer(0.6f, () => { if (StillOwned()) ApplyGlow(ownerSlot, playerOrBot); });
