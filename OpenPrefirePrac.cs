@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Commands;
@@ -17,9 +17,9 @@ namespace OpenPrefirePrac;
 public class OpenPrefirePrac : BasePlugin
 {
     public override string ModuleName => "Open Prefire Prac";
-    public override string ModuleVersion => "0.1.47";
+    public override string ModuleVersion => "0.1.48";
     public override string ModuleAuthor => "Lengran";
-    public override string ModuleDescription => "A plugin for practicing prefire in CS2. https://github.com/lengran/OpenPrefirePrac";
+    public override string ModuleDescription => "A plugin for practicing prefire in CS2. https://github.com/largepelotas/OpenPrefirePrac (fork of lengran/OpenPrefirePrac)";
 
     private readonly Dictionary<int, PlayerStatus> _playerStatuses = new();         // Key: slot of player
     
@@ -970,6 +970,11 @@ public class OpenPrefirePrac : BasePlugin
 
     private static int DrawBeam(Vector startPos, Vector endPos)
     {
+        return DrawBeam(startPos, endPos, System.Drawing.Color.Blue);
+    }
+
+    private static int DrawBeam(Vector startPos, Vector endPos, System.Drawing.Color color)
+    {
         var beam = Utilities.CreateEntityByName<CBeam>("beam");
         if (beam == null)
         {
@@ -978,7 +983,7 @@ public class OpenPrefirePrac : BasePlugin
             return -1;
         }
 
-        beam.Render = System.Drawing.Color.Blue;
+        beam.Render = color;
         beam.Width = 2.0f;
 
         beam.Teleport(startPos, QAngle.Zero, Vector.Zero);
@@ -987,6 +992,175 @@ public class OpenPrefirePrac : BasePlugin
 
         // Console.WriteLine($"[OpenPrefirePrac] Created a beam. Start position: {startPos}, end position: {endPos}, entity index: {beam.Index}");
         return (int)beam.Index;
+    }
+
+    // ---------------------------------------------------------------------
+    // Guiding-line recorder: walk a route in game, then save it to the profile.
+    //   !prefire record         toggle recording of your position
+    //   !prefire record save    write the recorded points into the current route and redraw the line
+    //   !prefire record clear   discard recorded points
+    // ---------------------------------------------------------------------
+    private const float RecordSampleInterval = 0.2f;    // seconds
+    private const float RecordMinDistance = 50f;        // units between joints
+    private const float RecordHeightOffset = 8f;        // lift the line slightly off the floor
+
+    private void HandleRecordCommand(CCSPlayerController player, string subCommand)
+    {
+        var slot = player.Slot;
+        if (!_playerStatuses.ContainsKey(slot) || _playerStatuses[slot].PracticeIndex < 0)
+        {
+            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.not_practicing")}");
+            return;
+        }
+
+        switch (subCommand)
+        {
+            case "":
+                if (_playerStatuses[slot].IsRecording)
+                {
+                    StopRecording(slot);
+                    player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.stop", _playerStatuses[slot].RecordedPoints.Count)}");
+                }
+                else
+                {
+                    StartRecording(player);
+                    player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.start")}");
+                }
+                return;
+            case "save":
+                StopRecording(slot);
+                SaveRecording(player);
+                return;
+            case "clear":
+                StopRecording(slot);
+                ClearRecording(slot);
+                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.cleared")}");
+                return;
+            default:
+                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.help")}");
+                return;
+        }
+    }
+
+    private static (float x, float y, float z)? GetPlayerFeet(CCSPlayerController player)
+    {
+        var pawn = player.PlayerPawn.Value;
+        if (!player.IsValid || !player.PawnIsAlive || pawn == null || pawn.AbsOrigin == null)
+            return null;
+        return (pawn.AbsOrigin.X, pawn.AbsOrigin.Y, pawn.AbsOrigin.Z + RecordHeightOffset);
+    }
+
+    private void StartRecording(CCSPlayerController player)
+    {
+        var slot = player.Slot;
+        var status = _playerStatuses[slot];
+        if (status.IsRecording)
+            return;
+
+        status.IsRecording = true;
+        var feet = GetPlayerFeet(player);
+        if (feet != null && (status.RecordedPoints.Count == 0 || PrefirePractice.FarEnough(status.RecordedPoints[^1], feet.Value, RecordMinDistance)))
+            AddRecordedPoint(slot, feet.Value);
+
+        status.RecordingTimer = AddTimer(RecordSampleInterval, () => SampleRecording(slot), TimerFlags.REPEAT);
+    }
+
+    private void SampleRecording(int slot)
+    {
+        if (!_playerStatuses.TryGetValue(slot, out var status) || !status.IsRecording)
+            return;
+
+        var player = Utilities.GetPlayerFromSlot(slot);
+        if (player == null || !player.IsValid)
+        {
+            StopRecording(slot);
+            return;
+        }
+
+        var feet = GetPlayerFeet(player);
+        if (feet == null)
+            return;
+
+        if (status.RecordedPoints.Count == 0 || PrefirePractice.FarEnough(status.RecordedPoints[^1], feet.Value, RecordMinDistance))
+            AddRecordedPoint(slot, feet.Value);
+    }
+
+    private void AddRecordedPoint(int slot, (float x, float y, float z) point)
+    {
+        var status = _playerStatuses[slot];
+        if (status.RecordedPoints.Count > 0)
+        {
+            var prev = status.RecordedPoints[^1];
+            var beamIndex = DrawBeam(new Vector(prev.x, prev.y, prev.z), new Vector(point.x, point.y, point.z), System.Drawing.Color.Lime);
+            if (beamIndex != -1)
+                status.RecordingBeams.Add(beamIndex);
+        }
+        status.RecordedPoints.Add(point);
+    }
+
+    private void StopRecording(int slot)
+    {
+        if (!_playerStatuses.TryGetValue(slot, out var status))
+            return;
+        status.IsRecording = false;
+        status.RecordingTimer?.Kill();
+        status.RecordingTimer = null;
+    }
+
+    private void ClearRecording(int slot)
+    {
+        if (!_playerStatuses.TryGetValue(slot, out var status))
+            return;
+        status.RecordedPoints.Clear();
+        foreach (var index in status.RecordingBeams)
+        {
+            var beam = Utilities.GetEntityFromIndex<CBeam>(index);
+            if (beam != null && beam.IsValid)
+                beam.Remove();
+        }
+        status.RecordingBeams.Clear();
+    }
+
+    private void SaveRecording(CCSPlayerController player)
+    {
+        var slot = player.Slot;
+        var status = _playerStatuses[slot];
+        var practiceNo = status.PracticeIndex;
+
+        if (practiceNo < 0 || practiceNo >= _practices.Count)
+        {
+            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.not_practicing")}");
+            return;
+        }
+
+        if (status.RecordedPoints.Count < 2)
+        {
+            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.too_few")}");
+            return;
+        }
+
+        var practice = _practices[practiceNo];
+        var path = $"{ModuleDirectory}/maps/{_mapName}/{practice.PracticeName}.txt";
+        try
+        {
+            var lines = PrefirePractice.RewriteProfileWithGuidingLine(File.ReadAllLines(path), status.RecordedPoints);
+            File.WriteAllLines(path, lines);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[OpenPrefirePrac] Failed to save guiding line to {path}: {ex.Message}");
+            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.Red}{_translator!.Translate(player, "record.save_failed")}");
+            return;
+        }
+
+        practice.ReplaceGuidingLine(status.RecordedPoints);
+        var count = status.RecordedPoints.Count;
+        ClearRecording(slot);
+        DeleteGuidingLine(slot);
+        CreateGuidingLine(slot);
+
+        Console.WriteLine($"[OpenPrefirePrac] Saved {count}-point guiding line for {_mapName}/{practice.PracticeName} to {path}");
+        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.saved", count, practice.PracticeName)}");
     }
 
     private void SaveConvars()
@@ -1522,6 +1696,9 @@ public class OpenPrefirePrac : BasePlugin
                         }
                         player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "languagemenu.set")}");
                         return;
+                    case "record":
+                        HandleRecordCommand(player, commandInfo.ArgByIndex(2));
+                        return;
                     case "exit":
                         ForceStopPractice(player);
                         return;
@@ -1666,6 +1843,8 @@ public class OpenPrefirePrac : BasePlugin
         var previousPracticeNo = _playerStatuses[playerSlot].PracticeIndex;
         if (previousPracticeNo > -1)
         {
+            StopRecording(playerSlot);
+            ClearRecording(playerSlot);
             RemoveBots(playerSlot);
             DeleteGuidingLine(playerSlot);
 
