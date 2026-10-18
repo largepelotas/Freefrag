@@ -4088,6 +4088,10 @@ public class Freefrag : BasePlugin
                     var zDelta = float.IsNaN(originZ) ? "?" : (originZ - watch.TargetZ).ToString("F2");
                     Console.WriteLine($"[Freefrag] Bot {watchedBot.PlayerName} never reported ground contact within {LandingWatch.DefaultDeadlineTicks} ticks, freezing anyway (pawn flags {watchedPawn.Flags}, move type {watchedPawn.MoveType}, groundEntity valid {watchedPawn.GroundEntity?.IsValid ?? false}, Z delta to target {zDelta}).");
                 }
+                // Landing diagnostics (temporary, 2026-10-18): one line per bot so a floating bot can be matched to its
+                // target. "first z" is the pawn's Z on the first sample after the teleport, "now" at the verdict.
+                // max|vz| 0 with first z == now means the pawn never moved after the teleport.
+                Console.WriteLine($"[Freefrag] Landing: {watchedBot.PlayerName} {watch.Reason} after {watch.TicksTaken} ticks, target z {watch.TargetZ:F2}, first z {watch.FirstZ:F2}, now {originZ:F2}, max|vz| {watch.MaxAbsVz:F1}, flags {watchedPawn.Flags}, ground {(watchedPawn.Flags & FL_ONGROUND) != 0}/{watchedPawn.GroundEntity?.IsValid ?? false}/{watchedPawn.OnGroundLastTick}.");
                 FreezeBot(watchedBot);
             }
         }

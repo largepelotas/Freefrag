@@ -41,6 +41,14 @@ public sealed class LandingWatch
     /// <summary>How the watch finished; None while Pending.</summary>
     public LandingReason Reason => _reason;
 
+    // Diagnostics for the log line printed when the watch ends: did the pawn move at all after the teleport?
+    /// <summary>Z of the first sample, NaN before any.</summary>
+    public float FirstZ { get; private set; } = float.NaN;
+    /// <summary>Largest |vz| seen in any sample (NaN samples ignored).</summary>
+    public float MaxAbsVz { get; private set; }
+    /// <summary>Ticks between the start tick and the last Tick call.</summary>
+    public int TicksTaken { get; private set; }
+
     public LandingWatch(int startTick, int deadlineTicks = DefaultDeadlineTicks, int settleTicks = DefaultSettleTicks, int stableTicks = DefaultStableTicks)
     {
         if (deadlineTicks <= 0)
@@ -74,6 +82,10 @@ public sealed class LandingWatch
     {
         if (_verdict != LandingVerdict.Pending)
             return _verdict;
+
+        TicksTaken = tick - _startTick;
+        if (float.IsNaN(FirstZ)) FirstZ = z;
+        if (!float.IsNaN(vz) && MathF.Abs(vz) > MaxAbsVz) MaxAbsVz = MathF.Abs(vz);
 
         bool pastSettleWindow = tick >= _startTick + _settleTicks;
 

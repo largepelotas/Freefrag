@@ -272,3 +272,35 @@ public class LandingWatchTests
         Assert.Equal(LandingReason.Settled, w.Reason);
     }
 }
+
+public class LandingWatchDiagnosticsTests
+{
+    [Fact]
+    public void RecordsFirstZMaxFallSpeedAndTicksTaken()
+    {
+        // The diagnostics line printed when a watch ends needs to show whether the pawn moved at all
+        // after the teleport: first sampled Z, the largest |vz| seen, and how many ticks the watch ran.
+        var w = new LandingWatch(100, 32, settleTicks: 2, stableTicks: 3);
+        w.Tick(100, 10f, 0f, false);
+        w.Tick(101, 10f, -12.5f, false);
+        w.Tick(102, 9f, -25f, false);
+        w.Tick(103, 8.5f, -0.5f, false);
+        w.Tick(104, 8.5f, 0f, false);
+        w.Tick(105, 8.5f, 0f, false);
+        var verdict = w.Tick(106, 8.5f, 0f, false);
+
+        Assert.Equal(LandingVerdict.Landed, verdict);
+        Assert.Equal(10f, w.FirstZ);
+        Assert.Equal(25f, w.MaxAbsVz);
+        Assert.Equal(6, w.TicksTaken);
+    }
+
+    [Fact]
+    public void FirstZIsNaNBeforeAnySample()
+    {
+        var w = new LandingWatch(100, 32);
+        Assert.True(float.IsNaN(w.FirstZ));
+        Assert.Equal(0f, w.MaxAbsVz);
+        Assert.Equal(0, w.TicksTaken);
+    }
+}
