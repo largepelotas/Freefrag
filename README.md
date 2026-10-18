@@ -28,25 +28,25 @@ Note: "**-maxplayers_override 64**" is the most important one. It allows the ser
 
 ### Start prefire practice in game
 
-Send "**!prefire**" in chatbox or use command "**css_prefire**" in console. This will bring up the main menu.
+Send "**!freefrag**" in chatbox or use command "**css_freefrag**" in console. This will bring up the main menu.
 
 There are also some shortcut commands you can use.
 
-  - !prefire prac [number]: Start practicing on a selected route.
-  - !prefire map [map name]: Switch to another map.
-  - !prefire df [1-6]: Set the difficulty.
-  - !prefire mode [rand/full]: Set training mode.
-  - !prefire bw [rand/ump/ak/sct/awp/pistol/eco/force]: Set weapons for bots.
-  - !prefire gun [ak/m4/m4a1s/awp/deagle/usp/glock/none]: Set your weapon.
-  - !prefire jitter [0-64]: Set bot spawn offset.
-  - !prefire repeat [n/inf/off]: Repeat the current route.
-  - !prefire autoskip [n/off]: Skip route after deaths.
-  - !prefire hs [on/off]: Headshot-only damage.
-  - !prefire xray [on/off]: Outline bots through walls.
-  - !prefire lang [en/pt/zh]: Set language. en for English, pt para português, 中文选择 zh。
-  - !prefire exit: Stop practicing.
+  - !freefrag prac [number]: Start practicing on a selected route.
+  - !freefrag map [map name]: Switch to another map.
+  - !freefrag df [1-6]: Set the difficulty.
+  - !freefrag mode [rand/full]: Set training mode.
+  - !freefrag bw [rand/ump/ak/sct/awp/pistol/eco/force]: Set weapons for bots.
+  - !freefrag gun [ak/m4/m4a1s/awp/deagle/usp/glock/none]: Set your weapon.
+  - !freefrag jitter [0-64]: Set bot spawn offset.
+  - !freefrag repeat [n/inf/off]: Repeat the current route.
+  - !freefrag autoskip [n/off]: Skip route after deaths.
+  - !freefrag hs [on/off]: Headshot-only damage.
+  - !freefrag xray [on/off]: Outline bots through walls.
+  - !freefrag lang [en/pt/zh]: Set language. en for English, pt para português, 中文选择 zh。
+  - !freefrag exit: Stop practicing.
 
-You can always use **!prefire help** to see how to use them.
+You can always use **!freefrag help** to see how to use them.
 
 ### Adjust default settings
 
@@ -88,7 +88,7 @@ Explanation of values:
   - 1: Bots are outlined through walls, visible only to you.
 - MenuType:
   - 0: Chat menus (type !1-!9 to choose).
-  - 1: Screen menus (default), drawn in the centre of the screen. W/S move, D selects, A goes back, Tab closes. Arrow keys, Enter and Backspace work after a one-time bind; type `!prefire binds` in chat for the line to paste into the console.
+  - 1: Screen menus (default), drawn in the centre of the screen. W/S move, D selects, A goes back, Tab closes. Arrow keys, Enter and Backspace work after a one-time bind; type `!freefrag binds` in chat for the line to paste into the console.
 - MenuRows:
   - 1-8: Rows of a screen menu shown at once (default 7). Longer menus scroll.
 
@@ -286,12 +286,12 @@ Huge thanks.
 Some routes ship without a guiding line (fewer than two joints). Instead of collecting
 `getpos` output by hand, record it while playing:
 
-1. Start the route: `!prefire prac N`.
-2. `!prefire record` and walk the route the way it is meant to be played. You cannot take
+1. Start the route: `!freefrag prac N`.
+2. `!freefrag record` and walk the route the way it is meant to be played. You cannot take
    damage while recording, so the bots will not interrupt. A green line is drawn behind you
-   as you go (one joint every 50 units). `!prefire record` again pauses.
-3. `!prefire record save` writes the joints into `maps/<map>/<route>.txt`, replacing any
-   existing guiding line, and redraws the blue line immediately. `!prefire record clear`
+   as you go (one joint every 50 units). `!freefrag record` again pauses.
+3. `!freefrag record save` writes the joints into `maps/<map>/<route>.txt`, replacing any
+   existing guiding line, and redraws the blue line immediately. `!freefrag record clear`
    discards. Leaving the route also discards an unsaved recording.
 
 On a kus/cs2-modded-server install the plugin folder is overwritten on restart, so run

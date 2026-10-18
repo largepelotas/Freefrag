@@ -121,7 +121,7 @@ public class OpenPrefirePrac : BasePlugin
         }
 
         // Register players already on the server. This used to run only on hotReload, so a manual
-        // unload-then-load left connected players without a status entry and every !prefire command
+        // unload-then-load left connected players without a status entry and every !freefrag command
         // threw KeyNotFoundException until they reconnected.
         foreach (var tempPlayer in Utilities.GetPlayers())
         {
@@ -840,13 +840,13 @@ public class OpenPrefirePrac : BasePlugin
     }
 
     // Console commands for the screen menu; players bind them to arrow keys, Enter and Backspace
-    // (!prefire binds), because the server cannot set client binds.
+    // (!freefrag binds), because the server cannot set client binds.
     private void RegisterMenuCommands()
     {
-        AddCommand("css_prefire_up", "Screen menu: move up.", (player, _) => { if (player != null) _screenMenu?.Up(player); });
-        AddCommand("css_prefire_down", "Screen menu: move down.", (player, _) => { if (player != null) _screenMenu?.Down(player); });
-        AddCommand("css_prefire_select", "Screen menu: choose the highlighted entry.", (player, _) => { if (player != null) _screenMenu?.Select(player); });
-        AddCommand("css_prefire_back", "Screen menu: go back one level.", (player, _) => { if (player != null) _screenMenu?.Back(player); });
+        AddCommand("css_freefrag_up", "Screen menu: move up.", (player, _) => { if (player != null) _screenMenu?.Up(player); });
+        AddCommand("css_freefrag_down", "Screen menu: move down.", (player, _) => { if (player != null) _screenMenu?.Down(player); });
+        AddCommand("css_freefrag_select", "Screen menu: choose the highlighted entry.", (player, _) => { if (player != null) _screenMenu?.Select(player); });
+        AddCommand("css_freefrag_back", "Screen menu: go back one level.", (player, _) => { if (player != null) _screenMenu?.Back(player); });
     }
 
     private void LoadPractice()
@@ -1317,9 +1317,9 @@ public class OpenPrefirePrac : BasePlugin
 
     // ---------------------------------------------------------------------
     // Guiding-line recorder: walk a route in game, then save it to the profile.
-    //   !prefire record         toggle recording of your position
-    //   !prefire record save    write the recorded points into the current route and redraw the line
-    //   !prefire record clear   discard recorded points
+    //   !freefrag record         toggle recording of your position
+    //   !freefrag record save    write the recorded points into the current route and redraw the line
+    //   !freefrag record clear   discard recorded points
     // ---------------------------------------------------------------------
     private const float RecordSampleInterval = 0.2f;    // seconds
     private const float RecordMinDistance = 50f;        // units between joints
@@ -1986,7 +1986,7 @@ public class OpenPrefirePrac : BasePlugin
             UnregisterCommand();
         }
 
-        _command = new CommandDefinition("css_prefire", "Command to bring up the main menu of OpenPrefirePrac.", (player, commandInfo) => {
+        _command = new CommandDefinition("css_freefrag", "Command to bring up the main menu of OpenPrefirePrac.", (player, commandInfo) => {
             // This is a client only command
             if (player == null)
             {

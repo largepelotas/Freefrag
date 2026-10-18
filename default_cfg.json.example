@@ -33,7 +33,7 @@
     // Menu type:
     //   0: Chat menus (type !1-!9 to choose).
     //   1: Screen menus drawn in the centre of the screen. W/S move, D selects, A goes back, Tab closes.
-    //      Arrow keys, Enter and Backspace work after a one-time bind: type !prefire binds.
+    //      Arrow keys, Enter and Backspace work after a one-time bind: type !freefrag binds.
     "MenuType": 1,
     // Rows of a screen menu shown at once (1-8). Longer menus scroll.
     "MenuRows": 7,
