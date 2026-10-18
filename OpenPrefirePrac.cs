@@ -48,13 +48,13 @@ public class OpenPrefirePrac : BasePlugin
 
     private const float BotSpawnInterval = 0.1f;
     private const float BotSpawnTimeout = 8f;                      // Seconds after the last bot_add before an unfulfilled request is dropped.
+    private const string ChatPrefix = "[Klitch's Freefrag]";       // Chat-facing name; console log lines keep [OpenPrefirePrac].
 
     private DefaultConfig ?_defaultPlayerSettings;
 
     private CommandDefinition ?_command;
 
-    private WasdBackend ?_wasd;                                     // WASDMenuAPI renderer; null until the capability is found.
-    private bool _wasdProbed;                                       // The "not found" note is logged once.
+    private ScreenMenu ?_screenMenu;                                // In-plugin centre-screen menus (MenuType 1); created in Load.
 
     private CounterStrikeSharp.API.Modules.Timers.Timer ?_timerBroadcastProgress;
 
@@ -89,6 +89,11 @@ public class OpenPrefirePrac : BasePlugin
 
         _defaultPlayerSettings = new DefaultConfig(ModuleDirectory);
         _defaultPlayerSettings.LoadDefaultSettings();
+
+        _screenMenu = new ScreenMenu(
+            () => _defaultPlayerSettings?.MenuRows ?? 7,
+            p => _translator!.Translate(p, "menu.footer"));
+        RegisterMenuCommands();
 
         if (hotReload)
         {
@@ -154,6 +159,7 @@ public class OpenPrefirePrac : BasePlugin
         try { ScoreRepository.ReleaseAll(); } catch (Exception) { }
 
         UnregisterCommand();
+        _screenMenu?.Clear();
 
         RemoveListener<Listeners.OnClientPutInServer>(OnClientPutInServerHandler);
         RemoveListener<Listeners.OnMapStart>(OnMapStartHandler);
@@ -257,6 +263,8 @@ public class OpenPrefirePrac : BasePlugin
             // Console.WriteLine("[OpenPrefirePrac] OnPlayerDisconnect doesn't work now. Player = null.");
             return HookResult.Continue;
         }
+
+        _screenMenu?.ForgetPlayer(player.Slot);
 
         if (!_playerStatuses.ContainsKey(player.Slot))
             return HookResult.Continue;
@@ -413,7 +421,7 @@ public class OpenPrefirePrac : BasePlugin
                 {
                     // Another player took that route between the death and this respawn. Stay on the current route;
                     // the same-index path re-adds the bots the death branch skipped and runs SetupPrefireMode.
-                    playerOrBot.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(playerOrBot, "practice.incompatible")}");
+                    playerOrBot.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(playerOrBot, "practice.incompatible")}");
                     pendingRoute = _playerStatuses[playerOrBot.Slot].PracticeIndex;
                 }
                 StartPractice(playerOrBot, pendingRoute);
@@ -557,7 +565,7 @@ public class OpenPrefirePrac : BasePlugin
                         status.PendingRoute = nextRoute.Value;
                         status.DeathsOnRoute = 0;
                         var practiceName = _translator!.Translate(playerOrBot, "map." + _mapName + "." + _practices[nextRoute.Value].PracticeName);
-                        playerOrBot.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator.Translate(playerOrBot, "practice.autoskip", status.AutoSkipDeaths, practiceName)}");
+                        playerOrBot.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator.Translate(playerOrBot, "practice.autoskip", status.AutoSkipDeaths, practiceName)}");
                         return HookResult.Continue;
                     }
                 }
@@ -574,7 +582,7 @@ public class OpenPrefirePrac : BasePlugin
     }
 
     // Menus are described once as MenuSpecs (PrefireMenu.cs) and rendered by whichever backend is active:
-    // WASD menus through the WASDMenuAPI plugin, or the stock ChatMenu (see ActiveWasd).
+    // screen menus drawn by ScreenMenu, or the stock ChatMenu (see UseScreenMenu).
 
     private void OnRouteSelect(CCSPlayerController player, string label)
     {
@@ -598,7 +606,7 @@ public class OpenPrefirePrac : BasePlugin
             items.Add(new MenuItem(mapName, p =>
             {
                 ChangeMap(p, mapName);
-                CloseWasdMenu(p);   // The chat menu closes itself on selection; the WASD menu does not.
+                CloseScreenMenu(p);   // The chat menu closes itself on selection; the screen menu does not.
             }));
         }
 
@@ -681,7 +689,7 @@ public class OpenPrefirePrac : BasePlugin
                 break;
         }
 
-        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "languagemenu.set")}");
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "languagemenu.set")}");
         AfterSettingChosen(player);
     }
 
@@ -722,52 +730,44 @@ public class OpenPrefirePrac : BasePlugin
         AfterSettingChosen(player);
     }
 
-    /// <summary>Returns the WASD backend when it is both configured and installed; null means use chat menus.</summary>
-    private WasdBackend? ActiveWasd()
+    /// <summary>True when menus are drawn on screen by this plugin; false means the stock chat menus.</summary>
+    private bool UseScreenMenu()
     {
-        int configured = _defaultPlayerSettings?.MenuType ?? MenuBackend.Wasd;
-        if (configured == MenuBackend.Chat)
-        {
-            return null;
-        }
-
-        if (_wasd == null)
-        {
-            // Probe again on every open until it is found: WASDMenuAPI may load after this plugin.
-            try
-            {
-                _wasd = WasdBackend.TryCreate();
-            }
-            catch (Exception ex)
-            {
-                // The shared assembly itself is missing (WASDMenuAPI not installed).
-                _wasd = null;
-                if (!_wasdProbed)
-                {
-                    Console.WriteLine($"[OpenPrefirePrac] WASDMenuAPI shared library unavailable ({ex.GetType().Name}).");
-                }
-            }
-
-            if (_wasd == null && !_wasdProbed)
-            {
-                Console.WriteLine("[OpenPrefirePrac] WASDMenuAPI not found. Using chat menus until it is loaded.");
-            }
-            _wasdProbed = true;
-        }
-
-        return MenuBackend.Choose(configured, _wasd != null) == MenuBackend.Wasd ? _wasd : null;
+        return _screenMenu != null
+            && MenuBackend.Choose(_defaultPlayerSettings?.MenuType ?? MenuBackend.Screen) == MenuBackend.Screen;
     }
 
-    private void OpenMenu(CCSPlayerController player, MenuSpec spec, bool replaceOpenMenu = false)
+    private void OpenMenu(CCSPlayerController player, MenuSpec spec)
     {
-        var wasd = ActiveWasd();
-        if (wasd != null)
+        if (UseScreenMenu())
         {
-            wasd.OpenMain(player, spec, replaceOpenMenu);
+            _screenMenu!.Open(player, spec);
+            PrintBindsHintOnce(player);
             return;
         }
 
         OpenChatMenu(player, spec);
+    }
+
+    private void PrintBindsHintOnce(CCSPlayerController player)
+    {
+        if (!_playerStatuses.TryGetValue(player.Slot, out var status) || status.BindsHintShown)
+        {
+            return;
+        }
+
+        status.BindsHintShown = true;
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "menu.binds_hint")}");
+    }
+
+    private void PrintBinds(CCSPlayerController player)
+    {
+        var chunks = ChatChunks.Split(_translator!.Translate(player, "menu.binds"));
+        for (var i = 0; i < chunks.Count; i++)
+        {
+            var prefix = i == 0 ? $" {ChatColors.Green}{ChatPrefix} {ChatColors.White} " : " ";
+            player.PrintToChat(prefix + chunks[i]);
+        }
     }
 
     private void OpenChatMenu(CCSPlayerController player, MenuSpec spec)
@@ -790,7 +790,7 @@ public class OpenPrefirePrac : BasePlugin
         }
         menu.AddMenuOption(_translator!.Translate(player, "mainmenu.close_menu"), (p, _) => CloseCurrentMenu(p));
 
-        player.PrintToChat("============ [OpenPrefirePrac] ============");
+        player.PrintToChat($"============ {ChatPrefix} ============");
         MenuManager.OpenChatMenu(player, menu);
         if (spec.ChatFooter != null)
         {
@@ -799,42 +799,51 @@ public class OpenPrefirePrac : BasePlugin
         player.PrintToChat("===========================================");
     }
 
-    /// <summary>Closes the WASD menu if that backend is active; the chat menu needs nothing here.</summary>
-    private bool CloseWasdMenu(CCSPlayerController player)
+    /// <summary>Closes the screen menu if that backend is active; the chat menu needs nothing here.</summary>
+    private bool CloseScreenMenu(CCSPlayerController player)
     {
-        var wasd = ActiveWasd();
-        if (wasd == null)
+        if (!UseScreenMenu())
         {
             return false;
         }
 
-        wasd.CloseAll(player);
+        _screenMenu!.Close(player);
         return true;
     }
 
     /// <summary>Route picked, exit, or close: nothing stays open on either backend.</summary>
     private void CloseAllMenus(CCSPlayerController player)
     {
-        if (!CloseWasdMenu(player))
+        if (!CloseScreenMenu(player))
         {
             CloseCurrentMenu(player);
         }
     }
 
     /// <summary>
-    /// A setting was changed from a submenu. Chat: close, as it always did. WASD: go back to a rebuilt main
-    /// menu, because its "Current ..." labels were rendered before the change.
+    /// A setting was changed from a submenu. Chat: close, as it always did. Screen: go back to a rebuilt
+    /// main menu, because its "Current ..." labels were rendered before the change.
     /// </summary>
     private void AfterSettingChosen(CCSPlayerController player)
     {
-        if (ActiveWasd() != null)
+        if (CloseScreenMenu(player))
         {
-            OpenMenu(player, BuildMainMenu(player), replaceOpenMenu: true);
+            OpenMenu(player, BuildMainMenu(player));
         }
         else
         {
             CloseCurrentMenu(player);
         }
+    }
+
+    // Console commands for the screen menu; players bind them to arrow keys, Enter and Backspace
+    // (!prefire binds), because the server cannot set client binds.
+    private void RegisterMenuCommands()
+    {
+        AddCommand("css_prefire_up", "Screen menu: move up.", (player, _) => { if (player != null) _screenMenu?.Up(player); });
+        AddCommand("css_prefire_down", "Screen menu: move down.", (player, _) => { if (player != null) _screenMenu?.Down(player); });
+        AddCommand("css_prefire_select", "Screen menu: choose the highlighted entry.", (player, _) => { if (player != null) _screenMenu?.Select(player); });
+        AddCommand("css_prefire_back", "Screen menu: go back one level.", (player, _) => { if (player != null) _screenMenu?.Back(player); });
     }
 
     private void LoadPractice()
@@ -870,12 +879,12 @@ public class OpenPrefirePrac : BasePlugin
         RecordRun(owner);
         if (RepeatSetting.ShouldRestart(ref status.Repeat))
         {
-            owner.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(owner, "practice.repeat", status.Repeat == RepeatSetting.Infinite ? (object)"infinite" : status.Repeat)}");
+            owner.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(owner, "practice.repeat", status.Repeat == RepeatSetting.Infinite ? (object)"infinite" : status.Repeat)}");
             StartPractice(owner, status.PracticeIndex);
             return;
         }
 
-        owner.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(owner, "practice.finish")}");
+        owner.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(owner, "practice.finish")}");
         ExitPrefireMode(owner.Slot);
     }
 
@@ -883,7 +892,7 @@ public class OpenPrefirePrac : BasePlugin
     {
         if (_scores == null)
         {
-            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "score.disabled")}");
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "score.disabled")}");
             return;
         }
 
@@ -895,7 +904,7 @@ public class OpenPrefirePrac : BasePlugin
         }
         if (route < 0 || route >= _practices.Count)
         {
-            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "score.top.help", _practices.Count)}");
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "score.top.help", _practices.Count)}");
             return;
         }
 
@@ -903,16 +912,16 @@ public class OpenPrefirePrac : BasePlugin
         {
             var practiceName = _practices[route].PracticeName;
             var localizedName = _translator!.Translate(player, "map." + _mapName + "." + practiceName);
-            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator.Translate(player, "score.top.header", localizedName)}");
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator.Translate(player, "score.top.header", localizedName)}");
             var rows = _scores.Top(_mapName, practiceName, 5);
             if (rows.Count == 0)
             {
-                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator.Translate(player, "score.none")}");
+                player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator.Translate(player, "score.none")}");
                 return;
             }
             for (var i = 0; i < rows.Count; i++)
             {
-                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{ScoreFormat.TopLine(i + 1, rows[i])}");
+                player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{ScoreFormat.TopLine(i + 1, rows[i])}");
             }
         }
         catch (Exception e)
@@ -925,23 +934,23 @@ public class OpenPrefirePrac : BasePlugin
     {
         if (_scores == null)
         {
-            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "score.disabled")}");
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "score.disabled")}");
             return;
         }
 
         try
         {
-            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "score.stats.header", _mapName)}");
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "score.stats.header", _mapName)}");
             var rows = _scores.PlayerStats(player.SteamID, _mapName);
             if (rows.Count == 0)
             {
-                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator.Translate(player, "score.none")}");
+                player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator.Translate(player, "score.none")}");
                 return;
             }
             foreach (var row in rows)
             {
                 var localizedName = _translator.Translate(player, "map." + _mapName + "." + row.Route);
-                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{ScoreFormat.StatsLine(localizedName, row.BestMs, row.Runs)}");
+                player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{ScoreFormat.StatsLine(localizedName, row.BestMs, row.Runs)}");
             }
         }
         catch (Exception e)
@@ -958,7 +967,7 @@ public class OpenPrefirePrac : BasePlugin
         {
             if (status.Run.Dirty)
             {
-                owner.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(owner, "score.dirty")}");
+                owner.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(owner, "score.dirty")}");
             }
             return;
         }
@@ -978,7 +987,7 @@ public class OpenPrefirePrac : BasePlugin
                 status.HealingMethod, status.BotWeapon, status.HeadshotOnly, result.ElapsedMs, status.EnabledTargets.Count,
                 result.Deaths, result.Kills, result.HeadshotKills, DateTime.UtcNow));
             var line = ScoreFormat.FinishLine(result, prevBest);
-            owner.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{line}");
+            owner.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{line}");
             Console.WriteLine($"[OpenPrefirePrac] Score: {owner.PlayerName} {_mapName}/{practice.PracticeName} {line}");
         }
         catch (Exception e)
@@ -1327,7 +1336,7 @@ public class OpenPrefirePrac : BasePlugin
         var slot = player.Slot;
         if (!_playerStatuses.ContainsKey(slot) || _playerStatuses[slot].PracticeIndex < 0)
         {
-            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.not_practicing")}");
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "record.not_practicing")}");
             return;
         }
 
@@ -1337,12 +1346,12 @@ public class OpenPrefirePrac : BasePlugin
                 if (_playerStatuses[slot].IsRecording)
                 {
                     StopRecording(slot);
-                    player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.stop", _playerStatuses[slot].RecordedPoints.Count)}");
+                    player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "record.stop", _playerStatuses[slot].RecordedPoints.Count)}");
                 }
                 else
                 {
                     StartRecording(player);
-                    player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.start")}");
+                    player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "record.start")}");
                 }
                 return;
             case "save":
@@ -1352,10 +1361,10 @@ public class OpenPrefirePrac : BasePlugin
             case "clear":
                 StopRecording(slot);
                 ClearRecording(slot);
-                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.cleared")}");
+                player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "record.cleared")}");
                 return;
             default:
-                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.help")}");
+                player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "record.help")}");
                 return;
         }
     }
@@ -1451,13 +1460,13 @@ public class OpenPrefirePrac : BasePlugin
 
         if (practiceNo < 0 || practiceNo >= _practices.Count)
         {
-            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.not_practicing")}");
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "record.not_practicing")}");
             return;
         }
 
         if (status.RecordedPoints.Count < 2)
         {
-            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.too_few")}");
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "record.too_few")}");
             return;
         }
 
@@ -1471,7 +1480,7 @@ public class OpenPrefirePrac : BasePlugin
         catch (Exception ex)
         {
             Console.WriteLine($"[OpenPrefirePrac] Failed to save guiding line to {path}: {ex.Message}");
-            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.Red}{_translator!.Translate(player, "record.save_failed")}");
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.Red}{_translator!.Translate(player, "record.save_failed")}");
             return;
         }
 
@@ -1482,7 +1491,7 @@ public class OpenPrefirePrac : BasePlugin
         CreateGuidingLine(slot);
 
         Console.WriteLine($"[OpenPrefirePrac] Saved {count}-point guiding line for {_mapName}/{practice.PracticeName} to {path}");
-        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.saved", count, practice.PracticeName)}");
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "record.saved", count, practice.PracticeName)}");
     }
 
     /// <summary>True if another player's active route makes this one unavailable. The asking player's own route never blocks them.</summary>
@@ -1842,7 +1851,7 @@ public class OpenPrefirePrac : BasePlugin
             // Check if selected practice route is compatible with other players' on-going routes.
             if (RouteBlockedByOthers(player.Slot, practiceIndex))
             {
-                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "practice.incompatible")}");
+                player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "practice.incompatible")}");
                 return;
             }
 
@@ -1893,7 +1902,7 @@ public class OpenPrefirePrac : BasePlugin
         // Practice begin
         AddTimer(0.5f, () => SetupPrefireMode(player));
         var localizedPracticeName = _translator!.Translate(player, "map." + _mapName + "." + _practices[practiceIndex].PracticeName);
-        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator.Translate(player, "practice.choose", localizedPracticeName)}");
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator.Translate(player, "practice.choose", localizedPracticeName)}");
         player.PrintToCenter(_translator.Translate(player, "practice.begin"));
     }
 
@@ -1902,7 +1911,7 @@ public class OpenPrefirePrac : BasePlugin
         // Check if the map has practice routes
         if (!_availableMaps.Contains(mapName))
         {
-            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "mapmenu.not_available")}");
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "mapmenu.not_available")}");
             return;
         }
 
@@ -1913,7 +1922,7 @@ public class OpenPrefirePrac : BasePlugin
         }
         else
         {
-            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "mapmenu.busy")}");
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "mapmenu.busy")}");
         }
     }
 
@@ -1923,7 +1932,7 @@ public class OpenPrefirePrac : BasePlugin
         var chunks = ChatChunks.Split(_translator!.Translate(player, "mainmenu.help", _practices.Count));
         for (var i = 0; i < chunks.Count; i++)
         {
-            var prefix = i == 0 ? $" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} " : " ";
+            var prefix = i == 0 ? $" {ChatColors.Green}{ChatPrefix} {ChatColors.White} " : " ";
             player.PrintToChat(prefix + chunks[i]);
         }
     }
@@ -1936,7 +1945,7 @@ public class OpenPrefirePrac : BasePlugin
         }
         _playerStatuses[player.Slot].HealingMethod = difficultyNo;
         var currentDifficulty = _translator!.Translate(player, $"difficulty.{difficultyNo}");
-        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "difficulty.set", currentDifficulty)}");
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "difficulty.set", currentDifficulty)}");
     }
 
     private void ChangeTrainingMode(CCSPlayerController player, int trainingMode)
@@ -1947,13 +1956,13 @@ public class OpenPrefirePrac : BasePlugin
         }
         _playerStatuses[player.Slot].TrainingMode = trainingMode;
         var currentTrainingMode = _translator!.Translate(player, $"modemenu.{trainingMode}");
-        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "modemenu.set", currentTrainingMode)}");
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "modemenu.set", currentTrainingMode)}");
     }
 
     private void ForceStopPractice(CCSPlayerController player)
     {
         ExitPrefireMode(player.Slot);
-        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "practice.exit")}");
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "practice.exit")}");
     }
 
     private void UnregisterCommand()
@@ -1993,7 +2002,7 @@ public class OpenPrefirePrac : BasePlugin
                             StartPractice(player, choice - 1);
                             return;
                         }
-                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "practice.help", _practices.Count)}");
+                        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "practice.help", _practices.Count)}");
                         return;
                     case "map":
                         string mapName = commandInfo.ArgByIndex(2);
@@ -2006,7 +2015,7 @@ public class OpenPrefirePrac : BasePlugin
                             ChangeDifficulty(player, 6 - difficulty);
                             return;
                         }
-                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "difficulty.help")}");
+                        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "difficulty.help")}");
                         return;
                     case "mode":
                         string trainingMode = commandInfo.ArgByIndex(2);
@@ -2019,7 +2028,7 @@ public class OpenPrefirePrac : BasePlugin
                                 ChangeTrainingMode(player, 0);
                                 return;
                             default:
-                                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "modemenu.help")}");
+                                player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "modemenu.help")}");
                                 return;
                         }
                     case "bw":
@@ -2029,39 +2038,39 @@ public class OpenPrefirePrac : BasePlugin
                             SetBotWeapon(player, botWeapon.Value);
                             return;
                         }
-                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "weaponmenu.help")}");
+                        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "weaponmenu.help")}");
                         return;
                     case "gun":
                         var gun = PlayerLoadout.ParseGun(commandInfo.ArgByIndex(2));
                         if (gun != null)
                         {
                             _playerStatuses[player.Slot].PlayerGun = gun;
-                            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "gun.set", gun)}");
+                            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "gun.set", gun)}");
                             if (_playerStatuses[player.Slot].PracticeIndex > -1)
                                 EquipPlayer(player);
                             return;
                         }
-                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "gun.help")}");
+                        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "gun.help")}");
                         return;
                     case "jitter":
                         var jitter = SpawnJitter.Parse(commandInfo.ArgByIndex(2));
                         if (jitter != null)
                         {
                             _playerStatuses[player.Slot].Jitter = jitter.Value;
-                            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "jitter.set", jitter.Value)}");
+                            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "jitter.set", jitter.Value)}");
                             return;
                         }
-                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "jitter.help")}");
+                        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "jitter.help")}");
                         return;
                     case "repeat":
                         var repeat = RepeatSetting.Parse(commandInfo.ArgByIndex(2));
                         if (repeat != null)
                         {
                             _playerStatuses[player.Slot].Repeat = repeat.Value;
-                            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "repeat.set", RepeatSetting.DisplayName(repeat.Value))}");
+                            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "repeat.set", RepeatSetting.DisplayName(repeat.Value))}");
                             return;
                         }
-                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "repeat.help")}");
+                        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "repeat.help")}");
                         return;
                     case "autoskip":
                         var autoSkip = AutoSkip.Parse(commandInfo.ArgByIndex(2));
@@ -2069,10 +2078,10 @@ public class OpenPrefirePrac : BasePlugin
                         {
                             _playerStatuses[player.Slot].AutoSkipDeaths = autoSkip.Value;
                             _playerStatuses[player.Slot].DeathsOnRoute = 0;
-                            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {(autoSkip.Value == 0 ? _translator!.Translate(player, "autoskip.off") : _translator!.Translate(player, "autoskip.set", autoSkip.Value))}");
+                            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {(autoSkip.Value == 0 ? _translator!.Translate(player, "autoskip.off") : _translator!.Translate(player, "autoskip.set", autoSkip.Value))}");
                             return;
                         }
-                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "autoskip.help")}");
+                        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "autoskip.help")}");
                         return;
                     case "hs":
                         var hsSetting = ToggleSetting.Parse(commandInfo.ArgByIndex(2), _playerStatuses[player.Slot].HeadshotOnly);
@@ -2083,17 +2092,17 @@ public class OpenPrefirePrac : BasePlugin
                                 _playerStatuses[player.Slot].Run.MarkDirty();
                             }
                             _playerStatuses[player.Slot].HeadshotOnly = hsSetting.Value;
-                            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "hs.set", ToggleSetting.DisplayName(hsSetting.Value))}");
+                            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "hs.set", ToggleSetting.DisplayName(hsSetting.Value))}");
                             return;
                         }
-                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "hs.help")}");
+                        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "hs.help")}");
                         return;
                     case "xray":
                         var xraySetting = ToggleSetting.Parse(commandInfo.ArgByIndex(2), _playerStatuses[player.Slot].Xray);
                         if (xraySetting != null)
                         {
                             _playerStatuses[player.Slot].Xray = xraySetting.Value;
-                            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "xray.set", ToggleSetting.DisplayName(xraySetting.Value))}");
+                            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "xray.set", ToggleSetting.DisplayName(xraySetting.Value))}");
                             if (_playerStatuses[player.Slot].PracticeIndex > -1)
                             {
                                 if (xraySetting.Value)
@@ -2112,7 +2121,7 @@ public class OpenPrefirePrac : BasePlugin
                             }
                             return;
                         }
-                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "xray.help")}");
+                        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "xray.help")}");
                         return;
                     case "lang":
                         string language = commandInfo.ArgByIndex(2);
@@ -2128,10 +2137,10 @@ public class OpenPrefirePrac : BasePlugin
                                 _translator!.UpdatePlayerCulture(player.SteamID, "ZH");
                                 break;
                             default:
-                                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "languagemenu.help")}");
+                                player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "languagemenu.help")}");
                                 return;
                         }
-                        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "languagemenu.set")}");
+                        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "languagemenu.set")}");
                         return;
                     case "top":
                         HandleTopCommand(player, commandInfo.ArgByIndex(2));
@@ -2144,6 +2153,9 @@ public class OpenPrefirePrac : BasePlugin
                         return;
                     case "exit":
                         ForceStopPractice(player);
+                        return;
+                    case "binds":
+                        PrintBinds(player);
                         return;
                     case "help":
                         PrintHelp(player);
@@ -2196,7 +2208,7 @@ public class OpenPrefirePrac : BasePlugin
             items.Add(new MenuItem(_translator.Translate(player, "mainmenu.exit"), OnForceExitPrefireMode));
         }
 
-        // 8 Close menu button: added by the chat renderer; the WASD menu has its own exit key.
+        // 8 Close menu button: added by the chat renderer; the screen menu closes with Tab.
 
         return new MenuSpec(_translator!.Translate(player, "mainmenu.title"), items, _translator.Translate(player, "mainmenu.shortcut_prompt"));
     }
@@ -2204,7 +2216,7 @@ public class OpenPrefirePrac : BasePlugin
     private void CloseCurrentMenu(CCSPlayerController player)
     {
         MenuManager.CloseActiveMenu(player);
-        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "mainmenu.menu_closed")}");
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "mainmenu.menu_closed")}");
     }
 
     private void SetBotWeapon(CCSPlayerController player, int botWeapon)
@@ -2217,7 +2229,7 @@ public class OpenPrefirePrac : BasePlugin
 
         string weaponName = botWeapon == 0 ? _translator!.Translate(player, "weaponmenu.random") : BotLoadout.DisplayName(botWeapon);
 
-        player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "weaponmenu.set", weaponName)}");
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "weaponmenu.set", weaponName)}");
     }
 
     private MenuSpec BuildPracticeMenu(CCSPlayerController player)
@@ -2592,6 +2604,18 @@ public class OpenPrefirePrac : BasePlugin
 
     private void OnTickHandler()
     {
+        if (_screenMenu != null)
+        {
+            foreach (var slot in _screenMenu.OpenSlots())
+            {
+                var menuPlayer = Utilities.GetPlayerFromSlot(slot);
+                if (menuPlayer != null && menuPlayer.IsValid && !menuPlayer.IsBot)
+                {
+                    _screenMenu.Tick(menuPlayer);
+                }
+            }
+        }
+
         if (_defaultPlayerSettings!.BotAimLock == 1)
         {
             foreach (int playerSlot in _playerStatuses.Keys)

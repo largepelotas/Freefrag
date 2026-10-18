@@ -88,7 +88,9 @@ Explanation of values:
   - 1: Bots are outlined through walls, visible only to you.
 - MenuType:
   - 0: Chat menus (type !1-!9 to choose).
-  - 1: WASD menus (default). Needs the WASDMenuAPI plugin; chat menus are used when it is not installed.
+  - 1: Screen menus (default), drawn in the centre of the screen. W/S move, D selects, A goes back, Tab closes. Arrow keys, Enter and Backspace work after a one-time bind; type `!prefire binds` in chat for the line to paste into the console.
+- MenuRows:
+  - 1-8: Rows of a screen menu shown at once (default 7). Longer menus scroll.
 
 For detailed discussion on bot difficulty, please refer to [this issue](https://github.com/lengran/OpenPrefirePrac/issues/17).
 
