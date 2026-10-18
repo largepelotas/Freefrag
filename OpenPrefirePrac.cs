@@ -17,7 +17,7 @@ namespace OpenPrefirePrac;
 public class OpenPrefirePrac : BasePlugin
 {
     public override string ModuleName => "Open Prefire Prac";
-    public override string ModuleVersion => "0.1.52";
+    public override string ModuleVersion => "0.1.53";
     public override string ModuleAuthor => "Lengran";
     public override string ModuleDescription => "A plugin for practicing prefire in CS2. https://github.com/largepelotas/OpenPrefirePrac (fork of lengran/OpenPrefirePrac)";
 
@@ -43,7 +43,10 @@ public class OpenPrefirePrac : BasePlugin
     
     private Translator ?_translator;
 
-    private readonly Dictionary<int, int> _botRequests = new();         // make this thread-safe if necessary. Map: Slot of player -> number of bots needed
+    private readonly BotRequestQueue _botRequests = new();        // One player's bots spawn at a time; see BotRequestQueue.
+
+    private const float BotSpawnInterval = 0.1f;
+    private const float BotSpawnTimeout = 8f;                      // Seconds after the last bot_add before an unfulfilled request is dropped.
 
     private DefaultConfig ?_defaultPlayerSettings;
 
@@ -177,28 +180,24 @@ public class OpenPrefirePrac : BasePlugin
             // For bots: If someone is practicing and it's an unmanaged bot, add or kick the bot
             if (_playerCount > 0 && !_ownerOfBots.ContainsKey(slot))
             {
-                if (_botRequests.Count > 0)
+                // Only the active request's bots are being spawned, so this bot belongs to its owner
+                // unless the bot's team says otherwise (then it came from somewhere else).
+                var ownerSlot = _botRequests.Claim(player.TeamNum, out var nextRequest);
+                if (ownerSlot.HasValue && _playerStatuses.ContainsKey(ownerSlot.Value))
                 {
-                    // Update requests (move this to the begining of this block)
-                    var tmpPlayerNumBots = _botRequests.FirstOrDefault();
-                    if (tmpPlayerNumBots.Value == 1)
-                    {
-                        _botRequests.Remove(tmpPlayerNumBots.Key);
-                    }
-                    else
-                    {
-                        _botRequests[tmpPlayerNumBots.Key]--;
-                    }
-
-                    // Put this bot under management
-                    _playerStatuses[tmpPlayerNumBots.Key].Bots.Add(slot);
-                    _ownerOfBots.Add(slot, tmpPlayerNumBots.Key);
-                    Console.WriteLine($"[OpenPrefirePrac] Bot {player.PlayerName}, slot: {slot} has been spawned.");
+                    _playerStatuses[ownerSlot.Value].Bots.Add(slot);
+                    _ownerOfBots.Add(slot, ownerSlot.Value);
+                    Console.WriteLine($"[OpenPrefirePrac] Bot {player.PlayerName}, slot: {slot} (team {player.TeamNum}) assigned to player slot {ownerSlot.Value}.");
                 }
                 else
                 {
-                    // Already have enough bots, kick this bot.
+                    // Nobody is waiting for this bot (or its owner is gone): kick it.
                     KickBot(slot);
+                }
+
+                if (nextRequest != null)
+                {
+                    IssueBotRequest(nextRequest);
                 }
             }
         }
@@ -235,10 +234,7 @@ public class OpenPrefirePrac : BasePlugin
 
         // Release resources(practices, targets, bots...)
         _playerStatuses.Remove(player.Slot);
-        if (_botRequests.ContainsKey(player.Slot))
-        {
-            _botRequests.Remove(player.Slot);
-        }
+        DropBotRequest(player.Slot);
 
         return HookResult.Continue;
     }
@@ -772,14 +768,13 @@ public class OpenPrefirePrac : BasePlugin
         {
             var bot = Utilities.GetPlayerFromSlot(botSlot);
 
-            if (bot == null || bot.IsValid)
+            if (bot == null || !bot.IsValid)
             {
-                botsToKick.Add(botSlot);
+                Console.WriteLine($"[OpenPrefirePrac] Trying to kick an invalid bot (slot {botSlot}). Unmanaging it.");
             }
-            else
-            {
-                Console.WriteLine($"[OpenPrefirePrac] Trying to kick an invalid bot.");
-            }
+
+            // KickBot drops the ownership records either way and only sends bot_kick for a valid bot.
+            botsToKick.Add(botSlot);
         }
 
         foreach (int botSlot in botsToKick)
@@ -792,32 +787,66 @@ public class OpenPrefirePrac : BasePlugin
 
     private void AddBot(CCSPlayerController player, int numberOfBots)
     {
-        Console.WriteLine($"[OpenPrefirePrac] Creating {numberOfBots} bots.");
-
-        // Test a new method of adding bots
-        if (_botRequests.ContainsKey(player.Slot))
+        int botTeam;
+        if (player.TeamNum == (byte)CsTeam.CounterTerrorist)
         {
-            _botRequests[player.Slot] = numberOfBots;
+            botTeam = BotRequestQueue.TeamT;
+        }
+        else if (player.TeamNum == (byte)CsTeam.Terrorist)
+        {
+            botTeam = BotRequestQueue.TeamCT;
         }
         else
         {
-            _botRequests.Add(player.Slot, numberOfBots);
+            Console.WriteLine($"[OpenPrefirePrac] Not requesting bots for player slot {player.Slot}: not on T or CT (team {player.TeamNum}).");
+            return;
         }
 
-        for (var i = 0; i < numberOfBots; i++)
+        Console.WriteLine($"[OpenPrefirePrac] Player slot {player.Slot} requests {numberOfBots} bots (queue length {_botRequests.Count}).");
+
+        var issue = _botRequests.Enqueue(player.Slot, botTeam, numberOfBots);
+        if (issue != null)
         {
-            AddTimer(i * 0.1f, () => {
-                if (player.TeamNum == (byte)CsTeam.CounterTerrorist)
-                {
-                    Server.ExecuteCommand("bot_join_team T");
-                    Server.ExecuteCommand("bot_add_t");
-                }
-                else if (player.TeamNum == (byte)CsTeam.Terrorist)
-                {
-                    Server.ExecuteCommand("bot_join_team CT");
-                    Server.ExecuteCommand("bot_add_ct");
-                }
+            IssueBotRequest(issue);
+        }
+    }
+
+    // Sends the bot_add commands for one request. Requests are issued one player at a time, so every
+    // bot that joins while this request is active is assigned to its owner in OnClientPutInServerHandler.
+    private void IssueBotRequest(BotRequestQueue.Issue issue)
+    {
+        var joinTeam = issue.BotTeam == BotRequestQueue.TeamT ? "T" : "CT";
+        var addCommand = issue.BotTeam == BotRequestQueue.TeamT ? "bot_add_t" : "bot_add_ct";
+        Console.WriteLine($"[OpenPrefirePrac] Creating {issue.Count} {joinTeam} bots for player slot {issue.OwnerSlot}.");
+
+        for (var i = 0; i < issue.Count; i++)
+        {
+            AddTimer(i * BotSpawnInterval, () => {
+                Server.ExecuteCommand($"bot_join_team {joinTeam}");
+                Server.ExecuteCommand(addCommand);
             });
+        }
+
+        // If the bots never show up (server full, bot_quota, ...) the request must not block everyone else.
+        AddTimer(issue.Count * BotSpawnInterval + BotSpawnTimeout, () => {
+            var next = _botRequests.ExpireIfStalled(issue.OwnerSlot, issue.IssueId, out var dropped);
+            if (dropped > 0)
+            {
+                Console.WriteLine($"[OpenPrefirePrac] Bot request of player slot {issue.OwnerSlot} timed out with {dropped} bots missing; dropping it.");
+            }
+            if (next != null)
+            {
+                IssueBotRequest(next);
+            }
+        });
+    }
+
+    private void DropBotRequest(int playerSlot)
+    {
+        var next = _botRequests.Remove(playerSlot);
+        if (next != null)
+        {
+            IssueBotRequest(next);
         }
     }
 
@@ -1897,11 +1926,8 @@ public class OpenPrefirePrac : BasePlugin
             _playerStatuses[playerSlot].PracticeIndex = -1;
             _playerCount--;
 
-            // patch: check and remove request of bots in case something goes wrong resulting in a stuck request
-            if (_botRequests.ContainsKey(playerSlot))
-            {
-                _botRequests.Remove(playerSlot);
-            }
+            // Drop any pending bot request so it cannot block the next player's request.
+            DropBotRequest(playerSlot);
         }
     }
 
