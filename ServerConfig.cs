@@ -19,6 +19,28 @@ public class DefaultConfig
     public int Xray { get; set; } = 0;
 
     /*
+     * 1 = bots shoot back. 0 = bots stand unarmed.
+    */
+    public int BotsFire { get; set; } = 1;
+
+    /*
+     * Bot health (1-1000) and armor (0-100) applied when a bot spawns.
+    */
+    public int BotHealth { get; set; } = BotHealthSetting.Default;
+
+    public int BotArmor { get; set; } = BotArmorSetting.Default;
+
+    /*
+     * Seconds the player is held still before a route starts (0-5). 0 = no countdown.
+    */
+    public int Countdown { get; set; } = CountdownSetting.Default;
+
+    /*
+     * Values that `!freefrag comp on` pins. Every key is optional; out-of-range values are ignored.
+    */
+    public CompConfig Comp { get; set; } = new();
+
+    /*
      * 0 = chat menus.
      * 1 = screen menus drawn by this plugin in the centre of the screen (W/S/A/D/Tab, or bound keys).
     */
@@ -111,6 +133,31 @@ public class DefaultConfig
                     Xray = jsonConfig.Xray;
                 }
 
+                if (jsonConfig.BotsFire > -1 && jsonConfig.BotsFire < 2)
+                {
+                    BotsFire = jsonConfig.BotsFire;
+                }
+
+                if (jsonConfig.BotHealth >= BotHealthSetting.Min && jsonConfig.BotHealth <= BotHealthSetting.Max)
+                {
+                    BotHealth = jsonConfig.BotHealth;
+                }
+
+                if (jsonConfig.BotArmor >= BotArmorSetting.Min && jsonConfig.BotArmor <= BotArmorSetting.Max)
+                {
+                    BotArmor = jsonConfig.BotArmor;
+                }
+
+                if (jsonConfig.Countdown >= CountdownSetting.Min && jsonConfig.Countdown <= CountdownSetting.Max)
+                {
+                    Countdown = jsonConfig.Countdown;
+                }
+
+                if (jsonConfig.Comp != null)
+                {
+                    Comp.CopyValidFrom(jsonConfig.Comp);
+                }
+
                 if (jsonConfig.MenuType > -1 && jsonConfig.MenuType < 2)
                 {
                     MenuType = jsonConfig.MenuType;
@@ -131,12 +178,48 @@ public class DefaultConfig
                     EquipPlayer = jsonConfig.EquipPlayer;
                 }
 
-                Console.WriteLine($"[Freefrag] Using default settings: Difficulty = {Difficulty}, TrainingMode = {TrainingMode}, BotWeapon = {BotWeapon}, PlayerGun = {PlayerGun}, Jitter = {Jitter}, HeadshotOnly = {HeadshotOnly}, Xray = {Xray}, MenuType = {MenuType}, MenuRows = {MenuRows}, BotAimLock = {BotAimLock}, EquipPlayer = {EquipPlayer}");
+                Console.WriteLine($"[Freefrag] Using default settings: Difficulty = {Difficulty}, TrainingMode = {TrainingMode}, BotWeapon = {BotWeapon}, PlayerGun = {PlayerGun}, Jitter = {Jitter}, HeadshotOnly = {HeadshotOnly}, Xray = {Xray}, BotsFire = {BotsFire}, BotHealth = {BotHealth}, BotArmor = {BotArmor}, Countdown = {Countdown}, MenuType = {MenuType}, MenuRows = {MenuRows}, BotAimLock = {BotAimLock}, EquipPlayer = {EquipPlayer}");
             }
             catch (System.Exception)
             {
                 Console.WriteLine("[Freefrag] Failed to load custom settings. Will use default settings.");
             }
         }
+    }
+}
+
+/// <summary>The values `!freefrag comp on` applies to a player, so every comp time is set under the same rules.</summary>
+public class CompConfig
+{
+    public int BotsFire { get; set; } = 1;
+
+    public int BotHealth { get; set; } = BotHealthSetting.Default;
+
+    public int BotArmor { get; set; } = BotArmorSetting.Default;
+
+    public int Countdown { get; set; } = CountdownSetting.Default;
+
+    /*
+     * 0 = off, -1 = infinite, n > 0 = n repeats (see RepeatSetting).
+    */
+    public int Repeat { get; set; } = RepeatSetting.Off;
+
+    public int Jitter { get; set; } = 0;
+
+    /// <summary>Takes each value of <paramref name="other"/> that is in range; an out-of-range value leaves the current one.</summary>
+    public void CopyValidFrom(CompConfig other)
+    {
+        if (other.BotsFire > -1 && other.BotsFire < 2)
+            BotsFire = other.BotsFire;
+        if (other.BotHealth >= BotHealthSetting.Min && other.BotHealth <= BotHealthSetting.Max)
+            BotHealth = other.BotHealth;
+        if (other.BotArmor >= BotArmorSetting.Min && other.BotArmor <= BotArmorSetting.Max)
+            BotArmor = other.BotArmor;
+        if (other.Countdown >= CountdownSetting.Min && other.Countdown <= CountdownSetting.Max)
+            Countdown = other.Countdown;
+        if (other.Repeat >= RepeatSetting.Infinite)
+            Repeat = other.Repeat;
+        if (other.Jitter >= 0 && other.Jitter <= SpawnJitter.Max)
+            Jitter = other.Jitter;
     }
 }

@@ -30,6 +30,23 @@
     "HeadshotOnly": 0,
     // X-ray: 1 = bots are outlined through walls (only for you). 0 = off.
     "Xray": 0,
+    // Bots shoot back: 1 = yes. 0 = bots spawn unarmed.
+    "BotsFire": 1,
+    // Bot health (1-1000) and armor (0-100; 0 also removes the helmet).
+    "BotHealth": 100,
+    "BotArmor": 100,
+    // Seconds the player is held still before a route begins (0-5). 0 = no countdown.
+    "Countdown": 3,
+    // Values that `!freefrag comp on` pins (and locks) so comp times are comparable.
+    // Repeat: 0 = off, -1 = infinite, n = n repeats. Out-of-range values are ignored.
+    "Comp": {
+        "BotsFire": 1,
+        "BotHealth": 100,
+        "BotArmor": 100,
+        "Countdown": 3,
+        "Repeat": 0,
+        "Jitter": 0
+    },
     // Menu type:
     //   0: Chat menus (type !1-!9 to choose).
     //   1: Screen menus drawn in the centre of the screen. W/S move, D selects, A goes back, Tab closes.

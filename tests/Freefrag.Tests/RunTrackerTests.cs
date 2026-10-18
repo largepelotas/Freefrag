@@ -118,4 +118,20 @@ public class RunTrackerTests
 
         Assert.Null(run.Finish());
     }
+
+    [Fact]
+    public void ElapsedIsMeasuredFromThisRunsKillsNotFromEarlierActivity()
+    {
+        // Prevents a delayed Begin (after the start countdown) or a restarted route from inheriting the previous run's first-kill time.
+        var run = new RunTracker();
+        run.Begin();
+        run.RecordKill(false, T0);
+        run.RecordKill(false, T0.AddSeconds(30));
+
+        run.Begin();
+        run.RecordKill(false, T0.AddSeconds(100));
+        run.RecordKill(false, T0.AddSeconds(104));
+
+        Assert.Equal(4000, run.Finish()!.ElapsedMs);
+    }
 }

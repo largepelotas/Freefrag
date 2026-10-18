@@ -363,15 +363,25 @@ public class Freefrag : BasePlugin
                     AddTimer(0.6f, () => ApplyGlow(ownerSlot, playerOrBot));
                     
 
-                    // Give bot weapons
+                    // Give bot weapons. With bots-fire off the bot is stripped and gets nothing back
+                    // (money 0 also stops it buying), so it stands frozen with empty hands.
+                    var botsFire = _playerStatuses[ownerSlot].BotsFire;
                     var items = BotLoadout.ItemsFor(_playerStatuses[ownerSlot].BotWeapon, new Random());
-                    if (items.Count > 0)
+                    if (!botsFire || items.Count > 0)
                     {
                         SetMoney(playerOrBot, 0);
                         playerOrBot.RemoveWeapons();
-                        foreach (var item in items)
-                            playerOrBot.GiveNamedItem(item);
+                        if (botsFire)
+                        {
+                            foreach (var item in items)
+                                playerOrBot.GiveNamedItem(item);
+                        }
                     }
+
+                    // Bot health and armor. Applied after the loadout and mp_free_armor have run, so ours wins.
+                    var botHealth = _playerStatuses[ownerSlot].BotHealth;
+                    var botArmor = _playerStatuses[ownerSlot].BotArmor;
+                    AddTimer(0.45f, () => ApplyBotVitals(playerOrBot, botHealth, botArmor));
 
                     // Try to increase bot difficulty
                     // playerOrBot.beha
@@ -901,7 +911,7 @@ public class Freefrag : BasePlugin
         ExitPrefireMode(owner.Slot);
     }
 
-    private void HandleTopCommand(CCSPlayerController player, string routeArg)
+    private void HandleTopCommand(CCSPlayerController player, string routeArg, bool compOnly = false)
     {
         if (_scores == null)
         {
@@ -926,7 +936,7 @@ public class Freefrag : BasePlugin
             var practiceName = _practices[route].PracticeName;
             var localizedName = _translator!.Translate(player, "map." + _mapName + "." + practiceName);
             player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator.Translate(player, "score.top.header", localizedName)}");
-            var rows = _scores.Top(_mapName, practiceName, 5);
+            var rows = _scores.Top(_mapName, practiceName, 5, compOnly ? (bool?)true : null);
             if (rows.Count == 0)
             {
                 player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator.Translate(player, "score.none")}");
@@ -998,7 +1008,7 @@ public class Freefrag : BasePlugin
             int? prevBest = _scores.BestFor(owner.SteamID, _mapName, practice.PracticeName, status.TrainingMode, status.HealingMethod);
             _scores.Insert(new ScoreRow(0, owner.SteamID, owner.PlayerName, _mapName, practice.PracticeName, status.TrainingMode,
                 status.HealingMethod, status.BotWeapon, status.HeadshotOnly, result.ElapsedMs, status.EnabledTargets.Count,
-                result.Deaths, result.Kills, result.HeadshotKills, DateTime.UtcNow));
+                result.Deaths, result.Kills, result.HeadshotKills, DateTime.UtcNow, status.Comp));
             var line = ScoreFormat.FinishLine(result, prevBest);
             owner.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{line}");
             Console.WriteLine($"[Freefrag] Score: {owner.PlayerName} {_mapName}/{practice.PracticeName} {line}");
@@ -1044,14 +1054,23 @@ public class Freefrag : BasePlugin
         });
     }
 
-    private void SetupPrefireMode(CCSPlayerController player)
+    private void SetupPrefireMode(CCSPlayerController player, bool withCountdown = false)
     {
-        var practiceNo = _playerStatuses[player.Slot].PracticeIndex;
+        var status = _playerStatuses[player.Slot];
+        var practiceNo = status.PracticeIndex;
+
+        // A respawn or a restart replaces any countdown still running.
+        CancelCountdown(player.Slot);
         
         GenerateRandomPractice(player.Slot);
         ResetBots(player.Slot);
         
         AddTimer(0.2f, () => MovePlayer(player, false, _practices[practiceNo].Player.Position, _practices[practiceNo].Player.Rotation));
+        if (withCountdown && status.Countdown > 0)
+        {
+            // Hold the player still once they are at the start spot; the route proper begins when they are released.
+            AddTimer(0.25f, () => StartCountdown(player, status));
+        }
         AddTimer(0.3f, () => EquipPlayer(player));
         AddTimer(0.35f, () => SetMoney(player, 60000));
         if (_playerStatuses[player.Slot].HealingMethod == 1 || _playerStatuses[player.Slot].HealingMethod == 5)
@@ -1196,6 +1215,100 @@ public class Freefrag : BasePlugin
             bot.PlayerPawn.Value.MoveType = MoveType_t.MOVETYPE_VPHYSICS;
             Schema.SetSchemaValue(bot.PlayerPawn.Value.Handle, "CBaseEntity", "m_nActualMoveType", 5);
             Utilities.SetStateChanged(bot.PlayerPawn.Value, "CBaseEntity", "m_MoveType");
+        }
+    }
+
+    private static void SetPlayerFrozen(CCSPlayerController? player, bool frozen)
+    {
+        if (player == null || !player.IsValid || player.IsHLTV || !player.PawnIsAlive || player.PlayerPawn.Value == null)
+            return;
+
+        // Same mechanism as FreezeBot; unfreezing restores MOVETYPE_WALK (2).
+        var pawn = player.PlayerPawn.Value;
+        pawn.MoveType = frozen ? MoveType_t.MOVETYPE_VPHYSICS : MoveType_t.MOVETYPE_WALK;
+        Schema.SetSchemaValue(pawn.Handle, "CBaseEntity", "m_nActualMoveType", frozen ? 5 : 2);
+        Utilities.SetStateChanged(pawn, "CBaseEntity", "m_MoveType");
+    }
+
+    // True while this exact player (not a later occupant of the same slot) is still connected and registered.
+    private bool IsRegisteredPlayer(CCSPlayerController player, PlayerStatus status) =>
+        player.IsValid && _playerStatuses.TryGetValue(player.Slot, out var current) && ReferenceEquals(current, status);
+
+    private void StartCountdown(CCSPlayerController player, PlayerStatus status)
+    {
+        if (!IsRegisteredPlayer(player, status) || status.PracticeIndex < 0 || !player.PawnIsAlive || status.Countdown <= 0)
+            return;
+
+        CancelCountdown(player.Slot);
+        status.CountdownRemaining = status.Countdown;
+        SetPlayerFrozen(player, true);
+        player.PrintToCenter(_translator!.Translate(player, "countdown.tick", status.CountdownRemaining));
+        status.CountdownTimer = AddTimer(1f, () => CountdownTick(player, status), TimerFlags.REPEAT);
+    }
+
+    private void CountdownTick(CCSPlayerController player, PlayerStatus status)
+    {
+        if (!IsRegisteredPlayer(player, status))
+        {
+            // The player left (or the slot was reused): never touch whoever is in the slot now.
+            status.CountdownTimer?.Kill();
+            status.CountdownTimer = null;
+            status.CountdownRemaining = 0;
+            return;
+        }
+
+        if (status.PracticeIndex < 0 || !player.PawnIsAlive)
+        {
+            // Practice stopped or the player died; a respawn brings a fresh, unfrozen pawn.
+            CancelCountdown(player.Slot);
+            return;
+        }
+
+        status.CountdownRemaining--;
+        if (status.CountdownRemaining > 0)
+        {
+            player.PrintToCenter(_translator!.Translate(player, "countdown.tick", status.CountdownRemaining));
+            return;
+        }
+
+        status.CountdownTimer?.Kill();
+        status.CountdownTimer = null;
+        SetPlayerFrozen(player, false);
+        player.PrintToCenter(_translator!.Translate(player, "countdown.go"));
+    }
+
+    // Stops a running countdown and releases the player. Safe to call when none is running.
+    private void CancelCountdown(int slot)
+    {
+        if (!_playerStatuses.TryGetValue(slot, out var status) || status.CountdownTimer == null)
+            return;
+
+        status.CountdownTimer.Kill();
+        status.CountdownTimer = null;
+        status.CountdownRemaining = 0;
+        SetPlayerFrozen(Utilities.GetPlayerFromSlot(slot), false);
+    }
+
+    private static void ApplyBotVitals(CCSPlayerController? bot, int health, int armor)
+    {
+        if (bot == null || !bot.IsValid || !bot.IsBot || bot.IsHLTV || !bot.PawnIsAlive || bot.PlayerPawn.Value == null)
+            return;
+
+        var pawn = bot.PlayerPawn.Value;
+        pawn.MaxHealth = health;
+        pawn.Health = health;
+        Utilities.SetStateChanged(pawn, "CBaseEntity", "m_iMaxHealth");
+        Utilities.SetStateChanged(pawn, "CBaseEntity", "m_iHealth");
+
+        pawn.ArmorValue = armor;
+        Utilities.SetStateChanged(pawn, "CCSPlayerPawn", "m_ArmorValue");
+
+        // Armor 0 means no kevlar and no helmet; mp_free_armor 2 and the force-buy preset would otherwise leave the helmet on.
+        if (armor == 0 && pawn.ItemServices != null)
+        {
+            var itemServices = new CCSPlayer_ItemServices(pawn.ItemServices.Handle);
+            itemServices.HasHelmet = false;
+            Utilities.SetStateChanged(pawn, "CBasePlayerPawn", "m_pItemServices");
         }
     }
 
@@ -1913,10 +2026,14 @@ public class Freefrag : BasePlugin
         }
 
         // Practice begin
-        AddTimer(0.5f, () => SetupPrefireMode(player));
+        AddTimer(0.5f, () => SetupPrefireMode(player, withCountdown: true));
         var localizedPracticeName = _translator!.Translate(player, "map." + _mapName + "." + _practices[practiceIndex].PracticeName);
         player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator.Translate(player, "practice.choose", localizedPracticeName)}");
-        player.PrintToCenter(_translator.Translate(player, "practice.begin"));
+        if (_playerStatuses[player.Slot].Countdown == 0)
+        {
+            // With a countdown running, its own center text replaces this one.
+            player.PrintToCenter(_translator.Translate(player, "practice.begin"));
+        }
     }
 
     private void ChangeMap(CCSPlayerController player, string mapName)
@@ -2107,6 +2224,51 @@ public class Freefrag : BasePlugin
                         }
                         player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "xray.help")}");
                         return;
+                    case "botsfire":
+                        var botsFireSetting = ToggleSetting.Parse(commandInfo.ArgByIndex(2), _playerStatuses[player.Slot].BotsFire);
+                        if (botsFireSetting != null)
+                        {
+                            SetBotsFire(player, botsFireSetting.Value);
+                            return;
+                        }
+                        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "botsfire.help")}");
+                        return;
+                    case "bothealth":
+                        var botHealthSetting = BotHealthSetting.Parse(commandInfo.ArgByIndex(2));
+                        if (botHealthSetting != null)
+                        {
+                            SetBotHealth(player, botHealthSetting.Value);
+                            return;
+                        }
+                        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "bothealth.help")}");
+                        return;
+                    case "botarmor":
+                        var botArmorSetting = BotArmorSetting.Parse(commandInfo.ArgByIndex(2));
+                        if (botArmorSetting != null)
+                        {
+                            SetBotArmor(player, botArmorSetting.Value);
+                            return;
+                        }
+                        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "botarmor.help")}");
+                        return;
+                    case "countdown":
+                        var countdownSetting = CountdownSetting.Parse(commandInfo.ArgByIndex(2));
+                        if (countdownSetting != null)
+                        {
+                            SetCountdown(player, countdownSetting.Value);
+                            return;
+                        }
+                        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "countdown.help")}");
+                        return;
+                    case "comp":
+                        var compSetting = ToggleSetting.Parse(commandInfo.ArgByIndex(2), _playerStatuses[player.Slot].Comp);
+                        if (compSetting != null)
+                        {
+                            SetComp(player, compSetting.Value);
+                            return;
+                        }
+                        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "comp.help")}");
+                        return;
                     case "lang":
                         string language = commandInfo.ArgByIndex(2);
                         switch (language)
@@ -2127,8 +2289,21 @@ public class Freefrag : BasePlugin
                         player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "languagemenu.set")}");
                         return;
                     case "top":
-                        HandleTopCommand(player, commandInfo.ArgByIndex(2));
+                    {
+                        // "top", "top 3", "top comp" or "top comp 3": the word comp limits the list to comp runs.
+                        var topCompOnly = false;
+                        var topRoute = "";
+                        for (var argIndex = 2; argIndex < commandInfo.ArgCount; argIndex++)
+                        {
+                            var topArg = commandInfo.ArgByIndex(argIndex);
+                            if (topArg.Equals("comp", StringComparison.OrdinalIgnoreCase))
+                                topCompOnly = true;
+                            else
+                                topRoute = topArg;
+                        }
+                        HandleTopCommand(player, topRoute, topCompOnly);
                         return;
+                    }
                     case "stats":
                         HandleStatsCommand(player);
                         return;
@@ -2227,17 +2402,121 @@ public class Freefrag : BasePlugin
             EquipPlayer(player);
     }
 
-    private void SetJitter(CCSPlayerController player, int jitter)
+    private void SetJitter(CCSPlayerController player, int jitter, bool announce = true)
     {
+        if (RefuseWhileComp(player, LockedSetting.Jitter))
+            return;
+
         _playerStatuses[player.Slot].Jitter = jitter;
-        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "jitter.set", jitter)}");
+        if (announce)
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "jitter.set", jitter)}");
     }
 
-    private void SetRepeat(CCSPlayerController player, int repeat)
+    private void SetRepeat(CCSPlayerController player, int repeat, bool announce = true)
     {
+        if (RefuseWhileComp(player, LockedSetting.Repeat))
+            return;
+
         _playerStatuses[player.Slot].Repeat = repeat;
-        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "repeat.set", RepeatSetting.DisplayName(repeat))}");
+        if (announce)
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "repeat.set", RepeatSetting.DisplayName(repeat))}");
     }
+
+    // While comp is on the settings in CompLock are pinned; both chat and menus reach them through the setters below.
+    private bool RefuseWhileComp(CCSPlayerController player, LockedSetting setting)
+    {
+        if (!CompLock.Refuses(_playerStatuses[player.Slot].Comp, setting))
+            return false;
+
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "comp.locked")}");
+        return true;
+    }
+
+    private void SetBotsFire(CCSPlayerController player, bool on, bool announce = true)
+    {
+        if (RefuseWhileComp(player, LockedSetting.BotsFire))
+            return;
+
+        var status = _playerStatuses[player.Slot];
+        if (status.BotsFire != on && status.PracticeIndex > -1)
+        {
+            status.Run.MarkDirty();
+        }
+        status.BotsFire = on;
+        if (announce)
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "botsfire.set", ToggleSetting.DisplayName(on))}");
+    }
+
+    private void SetBotHealth(CCSPlayerController player, int health, bool announce = true)
+    {
+        if (RefuseWhileComp(player, LockedSetting.BotHealth))
+            return;
+
+        var status = _playerStatuses[player.Slot];
+        if (status.BotHealth != health && status.PracticeIndex > -1)
+        {
+            status.Run.MarkDirty();
+        }
+        status.BotHealth = health;
+        if (announce)
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "bothealth.set", health)}");
+    }
+
+    private void SetBotArmor(CCSPlayerController player, int armor, bool announce = true)
+    {
+        if (RefuseWhileComp(player, LockedSetting.BotArmor))
+            return;
+
+        var status = _playerStatuses[player.Slot];
+        if (status.BotArmor != armor && status.PracticeIndex > -1)
+        {
+            status.Run.MarkDirty();
+        }
+        status.BotArmor = armor;
+        if (announce)
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "botarmor.set", armor)}");
+    }
+
+    // Takes effect at the next route start, so changing it mid-route does not void the run.
+    private void SetCountdown(CCSPlayerController player, int seconds, bool announce = true)
+    {
+        if (RefuseWhileComp(player, LockedSetting.Countdown))
+            return;
+
+        _playerStatuses[player.Slot].Countdown = seconds;
+        if (announce)
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "countdown.set", seconds)}");
+    }
+
+    private void SetComp(CCSPlayerController player, bool on)
+    {
+        var status = _playerStatuses[player.Slot];
+        if (on && !status.Comp)
+        {
+            // Pin every comp value through the normal setters (so a mid-route change voids the run as usual),
+            // with Comp still off so they are not refused, then lock.
+            var pins = _defaultPlayerSettings!.Comp;
+            SetBotsFire(player, pins.BotsFire == 1, false);
+            SetBotHealth(player, pins.BotHealth, false);
+            SetBotArmor(player, pins.BotArmor, false);
+            SetCountdown(player, pins.Countdown, false);
+            SetRepeat(player, pins.Repeat, false);
+            SetJitter(player, pins.Jitter, false);
+            status.Comp = true;
+            if (status.PracticeIndex > -1)
+            {
+                // A comp run has to start under comp rules (countdown included).
+                status.Run.MarkDirty();
+            }
+        }
+        else if (!on)
+        {
+            status.Comp = false;
+        }
+
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "comp.set", ToggleSetting.DisplayName(status.Comp))}");
+    }
+
 
     private void SetAutoSkip(CCSPlayerController player, int deaths)
     {
@@ -2282,6 +2561,9 @@ public class Freefrag : BasePlugin
     private static readonly int[] JitterChoices = { 0, 16, 32, 48, 64 };
     private static readonly int[] RepeatChoices = { RepeatSetting.Off, 1, 3, 5, RepeatSetting.Infinite };
     private static readonly int[] AutoSkipChoices = { 0, 1, 2, 3, 5 };
+    private static readonly int[] BotHealthChoices = { 1, 25, 50, 100, 250, 500, 1000 };
+    private static readonly int[] BotArmorChoices = { 0, 50, 100 };
+    private static readonly int[] CountdownChoices = { 0, 1, 2, 3, 4, 5 };
 
     private static string OffOrNumber(int value) => value == 0 ? "off" : value.ToString();
 
@@ -2310,6 +2592,11 @@ public class Freefrag : BasePlugin
         var status = _playerStatuses[player.Slot];
         var items = new List<MenuItem>
         {
+            new MenuItem(_translator!.Translate(player, "moremenu.comp", ToggleSetting.DisplayName(status.Comp)), p =>
+            {
+                SetComp(p, !_playerStatuses[p.Slot].Comp);
+                AfterMoreOptionChosen(p);
+            }),
             new MenuItem(_translator!.Translate(player, "moremenu.hs", ToggleSetting.DisplayName(status.HeadshotOnly)), p =>
             {
                 SetHeadshotOnly(p, !_playerStatuses[p.Slot].HeadshotOnly);
@@ -2321,8 +2608,16 @@ public class Freefrag : BasePlugin
                 AfterMoreOptionChosen(p);
             }),
             MenuItem.Opens(_translator.Translate(player, "moremenu.gun", GunLabel(player, status.PlayerGun)), () => BuildGunMenu(player)),
+            new MenuItem(_translator.Translate(player, "moremenu.botsfire", ToggleSetting.DisplayName(status.BotsFire)), p =>
+            {
+                SetBotsFire(p, !_playerStatuses[p.Slot].BotsFire);
+                AfterMoreOptionChosen(p);
+            }),
+            MenuItem.Opens(_translator.Translate(player, "moremenu.bothealth", status.BotHealth), () => BuildBotHealthMenu(player)),
+            MenuItem.Opens(_translator.Translate(player, "moremenu.botarmor", status.BotArmor), () => BuildBotArmorMenu(player)),
             MenuItem.Opens(_translator.Translate(player, "moremenu.jitter", OffOrNumber(status.Jitter)), () => BuildJitterMenu(player)),
             MenuItem.Opens(_translator.Translate(player, "moremenu.repeat", RepeatSetting.DisplayName(status.Repeat)), () => BuildRepeatMenu(player)),
+            MenuItem.Opens(_translator.Translate(player, "moremenu.countdown", OffOrNumber(status.Countdown)), () => BuildCountdownMenu(player)),
             MenuItem.Opens(_translator.Translate(player, "moremenu.autoskip", OffOrNumber(status.AutoSkipDeaths)), () => BuildAutoSkipMenu(player)),
             new MenuItem(_translator.Translate(player, "moremenu.top"), p =>
             {
@@ -2408,6 +2703,54 @@ public class Freefrag : BasePlugin
         return new MenuSpec(_translator!.Translate(player, "autoskipmenu.title"), items);
     }
 
+    private MenuSpec BuildBotHealthMenu(CCSPlayerController player)
+    {
+        var items = new List<MenuItem>();
+        foreach (var health in BotHealthChoices)
+        {
+            var choice = health;
+            items.Add(new MenuItem(choice.ToString(), p =>
+            {
+                SetBotHealth(p, choice);
+                AfterMoreOptionChosen(p);
+            }));
+        }
+
+        return new MenuSpec(_translator!.Translate(player, "bothealthmenu.title"), items);
+    }
+
+    private MenuSpec BuildBotArmorMenu(CCSPlayerController player)
+    {
+        var items = new List<MenuItem>();
+        foreach (var armor in BotArmorChoices)
+        {
+            var choice = armor;
+            items.Add(new MenuItem(choice.ToString(), p =>
+            {
+                SetBotArmor(p, choice);
+                AfterMoreOptionChosen(p);
+            }));
+        }
+
+        return new MenuSpec(_translator!.Translate(player, "botarmormenu.title"), items);
+    }
+
+    private MenuSpec BuildCountdownMenu(CCSPlayerController player)
+    {
+        var items = new List<MenuItem>();
+        foreach (var seconds in CountdownChoices)
+        {
+            var choice = seconds;
+            items.Add(new MenuItem(OffOrNumber(choice), p =>
+            {
+                SetCountdown(p, choice);
+                AfterMoreOptionChosen(p);
+            }));
+        }
+
+        return new MenuSpec(_translator!.Translate(player, "countdownmenu.title"), items);
+    }
+
     private MenuSpec BuildPracticeMenu(CCSPlayerController player)
     {
         // Dynamically draw menu
@@ -2432,6 +2775,7 @@ public class Freefrag : BasePlugin
 
     private void UnsetPrefireMode(int playerSlot)
     {
+        CancelCountdown(playerSlot);
         RemoveAllGlow(playerSlot);
         _playerStatuses[playerSlot].DeathsOnRoute = 0;
         _playerStatuses[playerSlot].PendingRoute = -1;

@@ -61,6 +61,13 @@ public class PlayerStatus
     public int PendingRoute = -1;
     public bool HeadshotOnly = false;
     public bool Xray = false;
+    public bool BotsFire = true;                         // false: managed bots spawn unarmed and cannot shoot.
+    public int BotHealth = BotHealthSetting.Default;
+    public int BotArmor = BotArmorSetting.Default;
+    public int Countdown = CountdownSetting.Default;     // Seconds the player is held still before a route starts.
+    public bool Comp = false;                            // Comp mode pins the settings in CompLock; runs are tagged on the score row.
+    public CounterStrikeSharp.API.Modules.Timers.Timer? CountdownTimer = null;
+    public int CountdownRemaining = 0;
     public bool MenuBindsUsed = false;                   // A menu navigation command has been seen; the bind hint stops.
     public readonly RunTracker Run = new();
     public readonly Dictionary<int, List<int>> GlowEntities = new();         // bot slot -> entity indices of its glow props
@@ -74,6 +81,10 @@ public class PlayerStatus
         Jitter = defaultConfig.Jitter;
         HeadshotOnly = defaultConfig.HeadshotOnly == 1;
         Xray = defaultConfig.Xray == 1;
+        BotsFire = defaultConfig.BotsFire == 1;
+        BotHealth = defaultConfig.BotHealth;
+        BotArmor = defaultConfig.BotArmor;
+        Countdown = defaultConfig.Countdown;
     }
 
     public PlayerStatus()

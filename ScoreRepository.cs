@@ -36,11 +36,29 @@ CREATE TABLE IF NOT EXISTS runs (
     deaths INTEGER NOT NULL,
     kills INTEGER NOT NULL,
     hs_kills INTEGER NOT NULL,
-    finished_at TEXT NOT NULL
+    finished_at TEXT NOT NULL,
+    Comp INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_runs_route ON runs(map, route, elapsed_ms);
 CREATE INDEX IF NOT EXISTS idx_runs_player ON runs(steam_id, map);";
         cmd.ExecuteNonQuery();
+
+        // A database created before comp mode has no Comp column; CREATE TABLE IF NOT EXISTS leaves it untouched.
+        var hasComp = false;
+        cmd.CommandText = "PRAGMA table_info(runs);";
+        using (var reader = cmd.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                if (string.Equals(reader.GetString(1), "Comp", StringComparison.OrdinalIgnoreCase))
+                    hasComp = true;
+            }
+        }
+        if (!hasComp)
+        {
+            cmd.CommandText = "ALTER TABLE runs ADD COLUMN Comp INTEGER NOT NULL DEFAULT 0;";
+            cmd.ExecuteNonQuery();
+        }
     }
 
     public long Insert(ScoreRow row)
@@ -50,8 +68,8 @@ CREATE INDEX IF NOT EXISTS idx_runs_player ON runs(steam_id, map);";
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
 INSERT INTO runs (steam_id, player_name, map, route, mode, difficulty, bot_weapon, headshot_only,
-                  elapsed_ms, bots, deaths, kills, hs_kills, finished_at)
-VALUES ($steam, $name, $map, $route, $mode, $diff, $bw, $hs, $elapsed, $bots, $deaths, $kills, $hsk, $fin);
+                  elapsed_ms, bots, deaths, kills, hs_kills, finished_at, Comp)
+VALUES ($steam, $name, $map, $route, $mode, $diff, $bw, $hs, $elapsed, $bots, $deaths, $kills, $hsk, $fin, $comp);
 SELECT last_insert_rowid();";
         cmd.Parameters.AddWithValue("$steam", (long)row.SteamId);
         cmd.Parameters.AddWithValue("$name", row.PlayerName);
@@ -67,6 +85,7 @@ SELECT last_insert_rowid();";
         cmd.Parameters.AddWithValue("$kills", row.Kills);
         cmd.Parameters.AddWithValue("$hsk", row.HeadshotKills);
         cmd.Parameters.AddWithValue("$fin", row.FinishedAtUtc.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture));
+        cmd.Parameters.AddWithValue("$comp", row.Comp ? 1 : 0);
         return Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
@@ -87,20 +106,22 @@ WHERE steam_id = $steam AND map = $map AND route = $route AND mode = $mode AND d
         return result == null || result is DBNull ? null : Convert.ToInt32(result, CultureInfo.InvariantCulture);
     }
 
-    public IReadOnlyList<ScoreRow> Top(string map, string route, int limit)
+    /// <param name="compOnly">null = every run; true = comp runs only; false = casual runs only.</param>
+    public IReadOnlyList<ScoreRow> Top(string map, string route, int limit, bool? compOnly = null)
     {
         using var conn = new SqliteConnection(_connectionString);
         conn.Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
 SELECT id, steam_id, player_name, map, route, mode, difficulty, bot_weapon, headshot_only,
-       elapsed_ms, bots, deaths, kills, hs_kills, finished_at
-FROM runs WHERE map = $map AND route = $route
+       elapsed_ms, bots, deaths, kills, hs_kills, finished_at, Comp
+FROM runs WHERE map = $map AND route = $route AND ($comp IS NULL OR Comp = $comp)
 ORDER BY elapsed_ms ASC, finished_at ASC
 LIMIT $limit;";
         cmd.Parameters.AddWithValue("$map", map);
         cmd.Parameters.AddWithValue("$route", route);
         cmd.Parameters.AddWithValue("$limit", limit);
+        cmd.Parameters.AddWithValue("$comp", compOnly.HasValue ? (object)(compOnly.Value ? 1 : 0) : DBNull.Value);
         var rows = new List<ScoreRow>();
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
@@ -109,7 +130,8 @@ LIMIT $limit;";
                 reader.GetInt64(0), (ulong)reader.GetInt64(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
                 reader.GetInt32(5), reader.GetInt32(6), reader.GetInt32(7), reader.GetInt32(8) != 0,
                 reader.GetInt32(9), reader.GetInt32(10), reader.GetInt32(11), reader.GetInt32(12), reader.GetInt32(13),
-                DateTime.Parse(reader.GetString(14), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)));
+                DateTime.Parse(reader.GetString(14), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
+                reader.GetInt32(15) != 0));
         }
         return rows;
     }
