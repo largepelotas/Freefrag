@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Deploy the build from scripts/build-on-server.sh into the kus/cs2-modded-server install on the OptiPlex.
 #
-# Only the plugin's own files are copied. `dotnet publish` also emits the CounterStrikeSharp API and its
-# dependencies; those must NOT land in the plugin folder or CSS will load a second copy of its own API.
+# Copied: the plugin's own files, MaxMind (GeoIP), and Microsoft.Data.Sqlite + SQLitePCLRaw + the native
+# libe_sqlite3.so for the scores database (CounterStrikeSharp does not ship Sqlite).
+# `dotnet publish` also emits the CounterStrikeSharp API and its dependencies;
+# those must NOT land in the plugin folder or CSS will load a second copy of its own API.
 #
 # Files go to custom_files (merged over the install on every container start, so they survive updates)
 # and to the live install path, then the plugin is hot-reloaded over RCON.
@@ -28,6 +30,10 @@ for dest in "$CUSTOM" "$LIVE"; do
   mkdir -p "$dest/lang"
   cp "$OUT"/OpenPrefirePrac.dll "$OUT"/OpenPrefirePrac.pdb "$OUT"/OpenPrefirePrac.deps.json "$dest/"
   cp "$OUT"/MaxMind.*.dll "$dest/" 2>/dev/null || true
+  cp "$OUT"/Microsoft.Data.Sqlite.dll "$OUT"/SQLitePCLRaw.*.dll "$dest/"
+  mkdir -p "$dest/runtimes/linux-x64/native"
+  cp "$OUT"/runtimes/linux-x64/native/libe_sqlite3.so "$dest/runtimes/linux-x64/native/"
+  cp "$OUT"/runtimes/linux-x64/native/libe_sqlite3.so "$dest/"      # SimpleAdmin ships it in both places
   cp "$SRC"/lang/*.json "$dest/lang/"
 done
 echo "deployed $(stat -c %y "$OUT/OpenPrefirePrac.dll" | cut -d. -f1) build to custom_files and live install"
