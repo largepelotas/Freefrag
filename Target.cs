@@ -69,6 +69,29 @@ public class PrefirePractice
         return dx * dx + dy * dy + dz * dz >= minDistance * minDistance;
     }
 
+    /// <summary>
+    /// Whether a candidate route is blocked by OTHER players. The server-wide conflict counter also
+    /// includes the asking player's own active route (itself plus everything it lists as incompatible),
+    /// which must not stop that player from switching.
+    /// </summary>
+    public static bool BlockedByOthers(int conflictCount, int ownPractice, int candidate, IReadOnlyList<string> ownIncompatible, string candidateName)
+    {
+        var ownContribution = 0;
+        if (ownPractice > -1)
+        {
+            if (ownPractice == candidate)
+                ownContribution = 1;
+            else
+            {
+                foreach (var name in ownIncompatible)
+                {
+                    if (name == candidateName) { ownContribution++; }
+                }
+            }
+        }
+        return conflictCount - ownContribution > 0;
+    }
+
     public void ReplaceGuidingLine(IEnumerable<(float x, float y, float z)> points)
     {
         GuidingLine.Clear();

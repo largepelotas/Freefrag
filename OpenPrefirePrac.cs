@@ -17,7 +17,7 @@ namespace OpenPrefirePrac;
 public class OpenPrefirePrac : BasePlugin
 {
     public override string ModuleName => "Open Prefire Prac";
-    public override string ModuleVersion => "0.1.51";
+    public override string ModuleVersion => "0.1.52";
     public override string ModuleAuthor => "Lengran";
     public override string ModuleDescription => "A plugin for practicing prefire in CS2. https://github.com/largepelotas/OpenPrefirePrac (fork of lengran/OpenPrefirePrac)";
 
@@ -1179,6 +1179,14 @@ public class OpenPrefirePrac : BasePlugin
         player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "record.saved", count, practice.PracticeName)}");
     }
 
+    /// <summary>True if another player's active route makes this one unavailable. The asking player's own route never blocks them.</summary>
+    private bool RouteBlockedByOthers(int slot, int practiceIndex)
+    {
+        var own = _playerStatuses.TryGetValue(slot, out var status) ? status.PracticeIndex : -1;
+        IReadOnlyList<string> ownIncompatible = own > -1 && own < _practices.Count ? _practices[own].IncompatiblePractices : Array.Empty<string>();
+        return PrefirePractice.BlockedByOthers(_pracConflictCount[practiceIndex], own, practiceIndex, ownIncompatible, _practices[practiceIndex].PracticeName);
+    }
+
     /// <summary>
     /// Path of a bundled behavior tree relative to game/csgo, derived from where the plugin actually lives
     /// (plugins/disabled/OpenPrefirePrac on kus/cs2-modded-server) instead of a hardcoded plugins/OpenPrefirePrac.
@@ -1525,8 +1533,8 @@ public class OpenPrefirePrac : BasePlugin
 
         if (previousPracticeIndex != practiceIndex)
         {
-            // Check if selected practice route is compatible with other on-playing routes.
-            if (_pracConflictCount[practiceIndex] > 0)
+            // Check if selected practice route is compatible with other players' on-going routes.
+            if (RouteBlockedByOthers(player.Slot, practiceIndex))
             {
                 player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "practice.incompatible")}");
                 return;
@@ -1844,7 +1852,7 @@ public class OpenPrefirePrac : BasePlugin
         // Add menu options for practices
         for (var i = 0; i < _practices.Count; i++)
         {
-            if (_pracConflictCount[i] == 0)
+            if (!RouteBlockedByOthers(player.Slot, i))
             {
                 var tmpLocalizedPracticeName = _translator.Translate(player, $"map.{_mapName}.{_practices[i].PracticeName}");
                 _playerStatuses[player.Slot].LocalizedPracticeNames.Add(tmpLocalizedPracticeName, i);

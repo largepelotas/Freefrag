@@ -69,3 +69,33 @@ public class ProfileRewriteTests
         Assert.False(PrefirePractice.FarEnough((0, 0, 0), (30, 30, 0), 50f));
     }
 }
+
+public class ConflictTests
+{
+    // conflictCount is the server-wide counter for the candidate route; the player's own active
+    // route contributes 1 to itself and 1 to each route it lists as incompatible.
+    [Fact]
+    public void OwnRouteDoesNotBlockItself()
+    {
+        Assert.False(PrefirePractice.BlockedByOthers(conflictCount: 1, ownPractice: 2, candidate: 2, ownIncompatible: new[] { "a_long" }, candidateName: "a_short"));
+    }
+
+    [Fact]
+    public void OwnRouteDoesNotBlockRoutesItListsAsIncompatible()
+    {
+        Assert.False(PrefirePractice.BlockedByOthers(conflictCount: 1, ownPractice: 2, candidate: 0, ownIncompatible: new[] { "a_long", "mid_to_b" }, candidateName: "a_long"));
+    }
+
+    [Fact]
+    public void AnotherPlayersRouteStillBlocks()
+    {
+        Assert.True(PrefirePractice.BlockedByOthers(conflictCount: 2, ownPractice: 2, candidate: 0, ownIncompatible: new[] { "a_long" }, candidateName: "a_long"));
+        Assert.True(PrefirePractice.BlockedByOthers(conflictCount: 1, ownPractice: -1, candidate: 0, ownIncompatible: System.Array.Empty<string>(), candidateName: "a_long"));
+    }
+
+    [Fact]
+    public void NotPracticingAndNoConflictsIsFree()
+    {
+        Assert.False(PrefirePractice.BlockedByOthers(conflictCount: 0, ownPractice: -1, candidate: 0, ownIncompatible: System.Array.Empty<string>(), candidateName: "a_long"));
+    }
+}
