@@ -42,6 +42,7 @@ public class OpenPrefirePrac : BasePlugin
     private CCSGameRules ?_serverGameRules;
     
     private Translator ?_translator;
+    private ScoreRepository? _scores;
 
     private readonly BotRequestQueue _botRequests = new();        // One player's bots spawn at a time; see BotRequestQueue.
 
@@ -63,7 +64,20 @@ public class OpenPrefirePrac : BasePlugin
         _playerCount = 0;
 
         _translator = new Translator(Localizer, ModuleDirectory, CultureInfo.CurrentCulture.Name);
-        
+
+        try
+        {
+            var scoresPath = Path.Combine(ModuleDirectory, "scores.db");
+            _scores = new ScoreRepository(scoresPath);
+            _scores.EnsureCreated();
+            Console.WriteLine($"[OpenPrefirePrac] Scores DB at {scoresPath}");
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"[OpenPrefirePrac] Scores disabled: {e.Message}");
+            _scores = null;
+        }
+
         RegisterListener<Listeners.OnClientPutInServer>(OnClientPutInServerHandler);
         RegisterListener<Listeners.OnMapStart>(OnMapStartHandler);
         RegisterListener<Listeners.OnTick>(OnTickHandler);
@@ -134,6 +148,8 @@ public class OpenPrefirePrac : BasePlugin
 
     public override void Unload(bool hotReload)
     {
+        try { ScoreRepository.ReleaseAll(); } catch (Exception) { }
+
         UnregisterCommand();
 
         RemoveListener<Listeners.OnClientPutInServer>(OnClientPutInServerHandler);
@@ -438,7 +454,16 @@ public class OpenPrefirePrac : BasePlugin
 
                 if (targetNo >= _practices[practiceIndex].NumBots)         // Bots might be killed after their first time getting spawned, so as to move them to target spots.
                 {
-                    // Award the player.
+                    // Award the player. Only the owner's own kills time the run; a bot that dies to another
+                    // player or to the world would otherwise shorten the owner's time, so that run is voided.
+                    if (@event.Attacker != null && @event.Attacker.IsValid && @event.Attacker.Slot == ownerSlot)
+                    {
+                        _playerStatuses[ownerSlot].Run.RecordKill(@event.Headshot, DateTime.UtcNow);
+                    }
+                    else
+                    {
+                        _playerStatuses[ownerSlot].Run.MarkDirty();
+                    }
                     if (owner.PawnIsAlive && owner.Pawn.Value != null)
                     {
                         owner.GiveNamedItem("item_assaultsuit");
@@ -520,6 +545,7 @@ public class OpenPrefirePrac : BasePlugin
             if (practiceIndex > -1)
             {
                 status.DeathsOnRoute++;
+                status.Run.RecordDeath();
                 if (status.AutoSkipDeaths > 0 && status.DeathsOnRoute >= status.AutoSkipDeaths)
                 {
                     var nextRoute = AutoSkip.NextRoute(practiceIndex, _practices.Count, i => RouteBlockedByOthers(playerOrBot.Slot, i));
@@ -744,6 +770,7 @@ public class OpenPrefirePrac : BasePlugin
     private void FinishRoute(CCSPlayerController owner)
     {
         var status = _playerStatuses[owner.Slot];
+        RecordRun(owner);
         if (RepeatSetting.ShouldRestart(ref status.Repeat))
         {
             owner.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(owner, "practice.repeat", status.Repeat == RepeatSetting.Infinite ? (object)"infinite" : status.Repeat)}");
@@ -753,6 +780,114 @@ public class OpenPrefirePrac : BasePlugin
 
         owner.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(owner, "practice.finish")}");
         ExitPrefireMode(owner.Slot);
+    }
+
+    private void HandleTopCommand(CCSPlayerController player, string routeArg)
+    {
+        if (_scores == null)
+        {
+            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "score.disabled")}");
+            return;
+        }
+
+        var route = _playerStatuses[player.Slot].PracticeIndex;
+        if (!string.IsNullOrEmpty(routeArg))
+        {
+            // An explicit but invalid route number gets the help text rather than silently showing the current route.
+            route = int.TryParse(routeArg, out var choice) && choice > 0 && choice <= _practices.Count ? choice - 1 : -1;
+        }
+        if (route < 0 || route >= _practices.Count)
+        {
+            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "score.top.help", _practices.Count)}");
+            return;
+        }
+
+        try
+        {
+            var practiceName = _practices[route].PracticeName;
+            var localizedName = _translator!.Translate(player, "map." + _mapName + "." + practiceName);
+            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator.Translate(player, "score.top.header", localizedName)}");
+            var rows = _scores.Top(_mapName, practiceName, 5);
+            if (rows.Count == 0)
+            {
+                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator.Translate(player, "score.none")}");
+                return;
+            }
+            for (var i = 0; i < rows.Count; i++)
+            {
+                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{ScoreFormat.TopLine(i + 1, rows[i])}");
+            }
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"[OpenPrefirePrac] Failed to read top scores: {e.Message}");
+        }
+    }
+
+    private void HandleStatsCommand(CCSPlayerController player)
+    {
+        if (_scores == null)
+        {
+            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "score.disabled")}");
+            return;
+        }
+
+        try
+        {
+            player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(player, "score.stats.header", _mapName)}");
+            var rows = _scores.PlayerStats(player.SteamID, _mapName);
+            if (rows.Count == 0)
+            {
+                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator.Translate(player, "score.none")}");
+                return;
+            }
+            foreach (var row in rows)
+            {
+                var localizedName = _translator.Translate(player, "map." + _mapName + "." + row.Route);
+                player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{ScoreFormat.StatsLine(localizedName, row.BestMs, row.Runs)}");
+            }
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"[OpenPrefirePrac] Failed to read stats: {e.Message}");
+        }
+    }
+
+    private void RecordRun(CCSPlayerController owner)
+    {
+        var status = _playerStatuses[owner.Slot];
+        var result = status.Run.Finish();
+        if (result == null)
+        {
+            if (status.Run.Dirty)
+            {
+                owner.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{_translator!.Translate(owner, "score.dirty")}");
+            }
+            return;
+        }
+        if (_scores == null) return;
+        if (owner.SteamID == 0)
+        {
+            // Unauthenticated (LAN / insecure) players would all share one leaderboard identity.
+            Console.WriteLine($"[OpenPrefirePrac] Score for {owner.PlayerName} not recorded: no SteamID.");
+            return;
+        }
+
+        try
+        {
+            var practice = _practices[status.PracticeIndex];
+            int? prevBest = _scores.BestFor(owner.SteamID, _mapName, practice.PracticeName, status.TrainingMode, status.HealingMethod);
+            _scores.Insert(new ScoreRow(0, owner.SteamID, owner.PlayerName, _mapName, practice.PracticeName, status.TrainingMode,
+                status.HealingMethod, status.BotWeapon, status.HeadshotOnly, result.ElapsedMs, status.EnabledTargets.Count,
+                result.Deaths, result.Kills, result.HeadshotKills, DateTime.UtcNow));
+            var line = ScoreFormat.FinishLine(result, prevBest);
+            owner.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White}{line}");
+            Console.WriteLine($"[OpenPrefirePrac] Score: {owner.PlayerName} {_mapName}/{practice.PracticeName} {line}");
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"[OpenPrefirePrac] Failed to record score: {e.Message}");
+        }
     }
 
     private void ResetBots(int slot)
@@ -1614,6 +1749,9 @@ public class OpenPrefirePrac : BasePlugin
                 return;
             }
 
+            // A new run starts only once the route is actually taken; a blocked attempt keeps the current run intact.
+            _playerStatuses[player.Slot].Run.Begin();
+
             // Update practice status
             if (previousPracticeIndex > -1)
             {
@@ -1642,6 +1780,9 @@ public class OpenPrefirePrac : BasePlugin
         }
         else
         {
+            // Re-selecting the current route (or a repeat restart) is a fresh run.
+            _playerStatuses[player.Slot].Run.Begin();
+
             // If some bots have already been kicked, add them back.
             var numRemainingBots = _playerStatuses[player.Slot].Bots.Count;
             
@@ -1681,6 +1822,10 @@ public class OpenPrefirePrac : BasePlugin
 
     private void ChangeDifficulty(CCSPlayerController player, int difficultyNo)
     {
+        if (_playerStatuses[player.Slot].HealingMethod != difficultyNo && _playerStatuses[player.Slot].PracticeIndex > -1)
+        {
+            _playerStatuses[player.Slot].Run.MarkDirty();
+        }
         _playerStatuses[player.Slot].HealingMethod = difficultyNo;
         var currentDifficulty = _translator!.Translate(player, $"difficulty.{difficultyNo}");
         player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "difficulty.set", currentDifficulty)}");
@@ -1688,6 +1833,10 @@ public class OpenPrefirePrac : BasePlugin
 
     private void ChangeTrainingMode(CCSPlayerController player, int trainingMode)
     {
+        if (_playerStatuses[player.Slot].TrainingMode != trainingMode && _playerStatuses[player.Slot].PracticeIndex > -1)
+        {
+            _playerStatuses[player.Slot].Run.MarkDirty();
+        }
         _playerStatuses[player.Slot].TrainingMode = trainingMode;
         var currentTrainingMode = _translator!.Translate(player, $"modemenu.{trainingMode}");
         player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "modemenu.set", currentTrainingMode)}");
@@ -1821,6 +1970,10 @@ public class OpenPrefirePrac : BasePlugin
                         var hsSetting = ToggleSetting.Parse(commandInfo.ArgByIndex(2), _playerStatuses[player.Slot].HeadshotOnly);
                         if (hsSetting != null)
                         {
+                            if (_playerStatuses[player.Slot].HeadshotOnly != hsSetting.Value && _playerStatuses[player.Slot].PracticeIndex > -1)
+                            {
+                                _playerStatuses[player.Slot].Run.MarkDirty();
+                            }
                             _playerStatuses[player.Slot].HeadshotOnly = hsSetting.Value;
                             player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "hs.set", ToggleSetting.DisplayName(hsSetting.Value))}");
                             return;
@@ -1871,6 +2024,12 @@ public class OpenPrefirePrac : BasePlugin
                                 return;
                         }
                         player.PrintToChat($" {ChatColors.Green}[OpenPrefirePrac] {ChatColors.White} {_translator!.Translate(player, "languagemenu.set")}");
+                        return;
+                    case "top":
+                        HandleTopCommand(player, commandInfo.ArgByIndex(2));
+                        return;
+                    case "stats":
+                        HandleStatsCommand(player);
                         return;
                     case "record":
                         HandleRecordCommand(player, commandInfo.ArgByIndex(2));
@@ -1941,6 +2100,10 @@ public class OpenPrefirePrac : BasePlugin
 
     private void SetBotWeapon(CCSPlayerController player, int botWeapon)
     {
+        if (_playerStatuses[player.Slot].BotWeapon != botWeapon && _playerStatuses[player.Slot].PracticeIndex > -1)
+        {
+            _playerStatuses[player.Slot].Run.MarkDirty();
+        }
         _playerStatuses[player.Slot].BotWeapon = botWeapon;
 
         string weaponName = botWeapon == 0 ? _translator!.Translate(player, "weaponmenu.random") : BotLoadout.DisplayName(botWeapon);
