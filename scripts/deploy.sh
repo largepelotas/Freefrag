@@ -7,7 +7,7 @@
 # Files go to custom_files (merged over the install on every container start, so they survive updates)
 # and to the live install path, then the plugin is hot-reloaded over RCON.
 #
-# Usage: scripts/deploy.sh [--no-reload]
+# Usage: scripts/deploy.sh [--no-reload]      FORCE_RELOAD=1 reloads even with players connected
 set -euo pipefail
 HOST=${CS2_HOST:-quinn@192.168.4.20}
 RELOAD=1; [ "${1:-}" = "--no-reload" ] && RELOAD=0
@@ -32,6 +32,13 @@ done
 echo "deployed $(stat -c %y "$OUT/OpenPrefirePrac.dll" | cut -d. -f1) build to custom_files and live install"
 
 if [ "$RELOAD" = 1 ]; then
+  # A reload resets every active practice and, right after a build, is the main way players get
+  # interrupted. Refuse while humans are connected unless FORCE_RELOAD=1.
+  HUMANS=$(python3 ~/cs2/rcon.py status | sed -n 's/.*players *: *\([0-9]*\) humans.*//p')
+  if [ "${HUMANS:-0}" != 0 ] && [ "${FORCE_RELOAD:-0}" != 1 ]; then
+    echo "$HUMANS human(s) connected; files copied but NOT reloaded. Re-run with FORCE_RELOAD=1 to reload anyway, or wait for the nightly restart."
+    exit 0
+  fi
   python3 ~/cs2/rcon.py 'say [OpenPrefirePrac] plugin reloading, your practice will reset in a moment' >/dev/null
   sleep 2
   python3 ~/cs2/rcon.py 'css_plugins unload "Open Prefire Prac"' 'css_plugins load "plugins/disabled/OpenPrefirePrac/OpenPrefirePrac.dll"' | tail -4
