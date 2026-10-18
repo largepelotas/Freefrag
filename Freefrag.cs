@@ -52,8 +52,10 @@ public class Freefrag : BasePlugin
     // logged Z trace shows whether a teleported bot ever falls; false restores the settle test.
     private const bool LandingDiagnosticsHold = true;
     private const float LandingDiagnosticsLift = 16f;
-    private const bool LandingDiagnosticsPulse = true;   // flip the duck state once after the teleport to wake the bot's movement    // units above the target to teleport to; 0 restores normal placement
-    private readonly Dictionary<int, LandingWatch> _landingWatches = new();   // Key: bot slot. Bots waiting to touch ground before FreezeBot.
+    private const bool LandingDiagnosticsDrop = true;    // hand a never-moved bot to MOVETYPE_FLYGRAVITY instead of freezing it, once
+    private const bool LandingDiagnosticsPulse = false;   // flip the duck state once after the teleport to wake the bot's movement    // units above the target to teleport to; 0 restores normal placement
+    private readonly Dictionary<int, LandingWatch> _landingWatches = new();
+    private readonly HashSet<int> _landingDropPhase = new();              // Diagnostic: bots given MOVETYPE_FLYGRAVITY after never moving; second watch running.
     private readonly HashSet<int> _landingTimeoutLogged = new();              // Owner slots whose current route start already logged a landing timeout.
     private const uint FL_ONGROUND = 1u << 0;
 
@@ -352,6 +354,7 @@ public class Freefrag : BasePlugin
             CancelBotAddTimers(ownerSlot);
         }
         _landingWatches.Clear();
+        _landingDropPhase.Clear();
         foreach (var botSlot in _ownerOfBots.Keys.ToList())
         {
             KickBot(botSlot);
@@ -408,6 +411,7 @@ public class Freefrag : BasePlugin
             status.Bots.Clear();
         }
         _landingWatches.Clear();
+        _landingDropPhase.Clear();
 
         UnregisterCommand();
         _screenMenu?.Clear();
@@ -3906,6 +3910,7 @@ public class Freefrag : BasePlugin
     private void KickBot(int botSlot)
     {
         _landingWatches.Remove(botSlot);
+        _landingDropPhase.Remove(botSlot);
 
         // The ownership records are dropped here, synchronously, even though the kick itself happens
         // later in the engine: callers (FinishRoute, the remaining-targets count) need Bots accurate
@@ -4110,6 +4115,20 @@ public class Freefrag : BasePlugin
                 // target. "first z" is the pawn's Z on the first sample after the teleport, "now" at the verdict.
                 // max|vz| 0 with first z == now means the pawn never moved after the teleport.
                 Console.WriteLine($"[Freefrag] Landing: {watchedBot.PlayerName} {watch.Reason} after {watch.TicksTaken} ticks, target z {watch.TargetZ:F2}, first z {watch.FirstZ:F2}, now {originZ:F2}, max|vz| {watch.MaxAbsVz:F1}, flags {watchedPawn.Flags}, ground {(watchedPawn.Flags & FL_ONGROUND) != 0}/{watchedPawn.GroundEntity?.IsValid ?? false}/{watchedPawn.OnGroundLastTick}, z trace [{string.Join(" ", watch.ZTrace.Select(zz => zz.ToString("F2")))}].");
+                // Diagnostic experiment (2026-10-18): a pawn that never moved (off the nav mesh, no bot movement) is
+                // handed to the engine's own gravity instead of being frozen, and watched a second time.
+                var neverMoved = watch.MaxAbsVz == 0f && !float.IsNaN(watch.FirstZ) && watch.FirstZ == originZ;
+                if (LandingDiagnosticsDrop && neverMoved && _landingDropPhase.Add(watchSlot))
+                {
+                    watchedPawn.MoveType = MoveType_t.MOVETYPE_FLYGRAVITY;
+                    Schema.SetSchemaValue(watchedPawn.Handle, "CBaseEntity", "m_nActualMoveType", (int)MoveType_t.MOVETYPE_FLYGRAVITY);
+                    Utilities.SetStateChanged(watchedPawn, "CBaseEntity", "m_MoveType");
+                    watchedPawn.Teleport(null, null, new Vector(0, 0, -50));
+                    Console.WriteLine($"[Freefrag] Drop: {watchedBot.PlayerName} never moved; set MOVETYPE_FLYGRAVITY at z {originZ:F2}, watching again.");
+                    _landingWatches[watchSlot] = new LandingWatch(Server.TickCount, stableTicks: LandingWatch.ZTraceCap) { TargetZ = watch.TargetZ };
+                    continue;
+                }
+                _landingDropPhase.Remove(watchSlot);
                 FreezeBot(watchedBot);
             }
         }
