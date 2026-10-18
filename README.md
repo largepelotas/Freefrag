@@ -337,3 +337,29 @@ load and at every map start, so a hot reload during Prefire wakes it up without 
 `!modes` / `/modes` opens Freefrag's own game modes menu (in every mode, active or dormant; switching still follows
 `GameModesPermission`). `deploy.sh` sets `Commands.Modes` to `false` in GameModeManager's config so its own `css_modes`
 does not run alongside it; `css_mode <name>` stays on. The change applies at the next container restart. It also copies the bundled behavior trees to `addons/scripts/ai/bt/` (where `prefire_settings.cfg` loads `hard_mode.kv3` from), so the old `custom_files/addons/counterstrikesharp/plugins/OpenPrefirePrac` mirror is no longer needed.
+
+### Re-syncing the bot behavior tree after a CS2 update
+
+`resources/bt/hard_mode.kv3` is Freefrag's bot behavior tree; its `config` node points at
+`resources/bt/bt_hard_config.kv3`, which must match the engine's own
+`addons/scripts/ai/bt/bt_config.kv3` key for key (same keys, same `attack` table shape). When
+CS2 changes that format the tree is rejected on every bot spawn and bots silently fall back
+to the stock profile. The symptom is this in `docker logs cs2`:
+
+```
+[AI BT]: Config node 'attack' must contain 13 entries. ... Unable to load behavior tree '...hard_mode.kv3'
+```
+
+To re-sync:
+
+1. Copy the engine's reference files off the server (read-only):
+   `scp quinn@192.168.4.20:'~/cs2/install/game/csgo/addons/scripts/ai/bt/bt_{config,very_hard_config}.kv3' /tmp/`
+2. Diff the `default` node of `bt_config.kv3` against `resources/bt/bt_hard_config.kv3`: add any
+   new keys with the stock value, drop removed ones, and give the `attack` table the same number
+   of rows (the row order follows the weapon-type enum; the comments name them). Keep Freefrag's
+   own values for the keys that still exist, since they are what makes the bots hard.
+3. Check `hard_mode.kv3` still only uses node types the engine knows
+   (`strings libserver.so | grep -E '^(decorator_|action_|condition_)'` on the server) and that
+   the `scripts/ai/modules/*.kv3` subtrees it references still exist in `pak01_dir.vpk`.
+4. Update the sync date in the comment at the top of `bt_hard_config.kv3`, build, deploy, and
+   confirm that `docker logs --since 10m cs2 | grep '\[AI BT\]'` prints nothing after a bot spawns.

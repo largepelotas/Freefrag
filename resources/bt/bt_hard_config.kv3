@@ -1,5 +1,9 @@
 <!-- kv3 encoding:text:version{e21c7f3c-8a33-41c5-9977-a76d3a32aa0d} format:generic:version{7412167c-06e9-4698-aff2-e63eb59037e7} -->
 {
+    // Schema synced against the engine's addons/scripts/ai/bt/bt_config.kv3 from the kus/cs2-modded-server
+    // image of 2026-10-18 (file dated 2026-10-18 16:02 UTC). Every key below must exist in that file with the same
+    // shape; the parser rejects the whole tree otherwise ("[AI BT]: Config node ... must contain N entries").
+    // See README.md, "Building (this fork)", for how to re-sync when CS2 changes the format.
     default =
     {
         aim_target_acquisition_lerp_time = 0.00005
@@ -34,24 +38,22 @@
         combat_dodge_command_duration = 0.0
         combat_dodge_command_duration_deviation = 0.0
 
+        // The engine now expects exactly 13 weapon rows (KNIFE .. STACKABLEITEM, UNKNOWN), each of 5 numbers.
+        // The old 20-row table (FISTS .. ZONE_REPULSOR) is rejected with "Config node 'attack' must contain 13 entries".
         attack =
         [
             // duration, duration deviation, cadence, cooldown, cooldown deviation
 
             // KNIFE                                    PISTOL                                  SUBMACHINEGUN
-            [ 0.09, -1.0, -1.0, -1.0, -1.0 ],           [ -1.0, 0.0, 0.6, 0.6, 0.6 ],       [ -1.0, -1.0, -1.0, -1.0, -1.0 ],
+            [ 0.09, -1.0, -1.0, -1.0, -1.0 ],           [ -1.0, 0.0, 0.6, 0.6, 0.6 ],           [ -1.0, -1.0, -1.0, -1.0, -1.0 ],
             // RIFLE                                    SHOTGUN                                 SNIPER_RIFLE
-            [ 0.2, 0.0, 0.01, 0.5, 0.02 ],           [ -1.0, -1.0, -1.0, -1.0, -1.0 ],       [ -1.0, -1.0, -1.0, -1.0, -1.0 ],
+            [ 0.2, 0.0, 0.01, 0.5, 0.02 ],              [ -1.0, -1.0, -1.0, -1.0, -1.0 ],       [ -1.0, -1.0, -1.0, -1.0, -1.0 ],
             // MACHINEGUN                               C4                                      TASER
             [ -1.0, -1.0, -1.0, -1.0, -1.0 ],           [ -1.0, -1.0, -1.0, -1.0, -1.0 ],       [ -1.0, -1.0, -1.0, -1.0, -1.0 ],
             // GRENADE                                  EQUIPMENT                               STACKABLEITEM
             [ -1.0, -1.0, -1.0, -1.0, -1.0 ],           [ -1.0, -1.0, -1.0, -1.0, -1.0 ],       [ -1.0, -1.0, -1.0, -1.0, -1.0 ],
-            // FISTS                                    BREACHCHARGE                            BUMPMINE
-            [ -1.0, -1.0, -1.0, -1.0, -1.0 ],           [ -1.0, -1.0, -1.0, -1.0, -1.0 ],       [ -1.0, -1.0, -1.0, -1.0, -1.0 ],
-            // TABLET                                   MELEE                                   SHIELD
-            [ -1.0, -1.0, -1.0, -1.0, -1.0 ],           [ -1.0, -1.0, -1.0, -1.0, -1.0 ],       [ -1.0, -1.0, -1.0, -1.0, -1.0 ],
-            // WEAPONTYPE_ZONE_REPULSOR                 UNKNOWN
-            [ -1.0, -1.0, -1.0, -1.0, -1.0 ],           [ -1.0, -1.0, -1.0, -1.0, -1.0 ]
+            // UNKNOWN
+            [ -1.0, -1.0, -1.0, -1.0, -1.0 ]
         ]
     }
 }
