@@ -413,10 +413,11 @@ public class Freefrag : BasePlugin
         RemoveListener<Listeners.CheckTransmit>(OnCheckTransmit);
         RemoveListener<Listeners.OnEntityTakeDamagePre>(OnTakeDamage);
 
-        // Glow props outlive the plugin otherwise; Unload clears the status registers below.
+        // Glow props and draft-bot markers outlive the plugin otherwise; Unload clears the status registers below.
         foreach (var ownerSlot in _playerStatuses.Keys.ToList())
         {
             RemoveAllGlow(ownerSlot);
+            ClearDraftBots(ownerSlot);
         }
 
         if (hotReload)
@@ -561,6 +562,11 @@ public class Freefrag : BasePlugin
         foreach (var status in _playerStatuses.Values)
         {
             status.GlowEntities.Clear();
+            status.DraftBots.Clear();
+            status.DraftBotBeams.Clear();
+            status.RecordingBeams.Clear();
+            status.Beams.Clear();
+            status.CompletedRoutes.Clear();     // route names are per map
         }
         _glowCount = 0;
 
@@ -878,7 +884,10 @@ public class Freefrag : BasePlugin
                 }
             }
             
-            if (practiceIndex > -1 && numBots < _practices[practiceIndex].NumBots)
+            // No bots for a route without targets (being built with addbot): they would be kicked on
+            // spawn and FinishRoute would throw the player off the route and discard the draft.
+            if (practiceIndex > -1 && numBots < _practices[practiceIndex].NumBots
+                && _practices[practiceIndex].Targets.Count > 0 && status.EnabledTargets.Count > 0)
             {
                 _playerStatuses[playerOrBot.Slot].Progress = 0;
                 AddBot(playerOrBot, _practices[practiceIndex].NumBots - numBots);
@@ -1093,7 +1102,8 @@ public class Freefrag : BasePlugin
         foreach (var item in spec.Items)
         {
             var menuItem = item;
-            menu.AddMenuOption(menuItem.Label, (p, _) =>
+            // A done entry is dimmed in chat too; the label itself stays unchanged for selection by name.
+            menu.AddMenuOption(menuItem.Done ? $"{ChatColors.Grey}{menuItem.Label}" : menuItem.Label, (p, _) =>
             {
                 if (menuItem.Submenu != null)
                 {
@@ -1194,6 +1204,8 @@ public class Freefrag : BasePlugin
     {
         var status = _playerStatuses[owner.Slot];
         RecordRun(owner);
+        if (status.PracticeIndex > -1 && status.PracticeIndex < _practices.Count)
+            status.CompletedRoutes.Add(_practices[status.PracticeIndex].PracticeName);
         if (RepeatSetting.ShouldRestart(ref status.Repeat))
         {
             owner.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(owner, "practice.repeat", status.Repeat == RepeatSetting.Infinite ? (object)"infinite" : status.Repeat)}");
@@ -1983,6 +1995,231 @@ public class Freefrag : BasePlugin
         player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "record.saved", count, practice.PracticeName)}");
     }
 
+    // ---------------------------------------------------------------------
+    // Route editor: place bots and create routes in game.
+    //   !freefrag addbot [crouch|stand]   add a draft bot where you stand, facing where you look
+    //   !freefrag addbot undo|clear|save  remove the last draft bot, discard all, or write them into the route
+    //   !freefrag newroute <name> [bots]  create an empty route that starts where you stand
+    // Pure profile editing lives in RouteEditor.cs.
+    // ---------------------------------------------------------------------
+    private const uint FL_DUCKING = 1u << 1;
+    private const int MaxNewRouteBots = 10;              // bots in play at once for a route created in game
+    private const float DraftMarkerStandHeight = 64f;
+    private const float DraftMarkerCrouchHeight = 48f;
+    private const float DraftMarkerFacingLength = 48f;
+
+    private void PrintEditorChat(CCSPlayerController player, string key, params object[] args)
+    {
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, key, args)}");
+    }
+
+    private void PrintEditorError(CCSPlayerController player, string key)
+    {
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.Red}{_translator!.Translate(player, key)}");
+    }
+
+    private void HandleAddBotCommand(CCSPlayerController player, string subCommand)
+    {
+        var slot = player.Slot;
+        if (!_playerStatuses.ContainsKey(slot) || _playerStatuses[slot].PracticeIndex < 0)
+        {
+            PrintEditorChat(player, "addbot.not_practicing");
+            return;
+        }
+
+        var status = _playerStatuses[slot];
+        switch (subCommand.ToLowerInvariant())
+        {
+            case "":
+            case "crouch":
+            case "stand":
+            {
+                var pawn = player.PlayerPawn.Value;
+                if (!player.IsValid || !player.PawnIsAlive || pawn == null || pawn.AbsOrigin == null)
+                {
+                    PrintEditorChat(player, "addbot.not_practicing");
+                    return;
+                }
+                var crouch = subCommand.Equals("crouch", StringComparison.OrdinalIgnoreCase)
+                    || (subCommand == "" && (pawn.Flags & FL_DUCKING) != 0);
+                var origin = pawn.AbsOrigin;
+                var angles = pawn.EyeAngles;
+                var bot = new RouteEditor.DraftBot(origin.X, origin.Y, origin.Z, angles.X, angles.Y, crouch);
+                status.DraftBots.Add(bot);
+                DrawDraftBotMarker(status, bot);
+                PrintEditorChat(player, "addbot.added", status.DraftBots.Count, crouch ? "crouching" : "standing");
+                return;
+            }
+            case "undo":
+            {
+                if (status.DraftBots.Count == 0)
+                {
+                    PrintEditorChat(player, "addbot.empty");
+                    return;
+                }
+                status.DraftBots.RemoveAt(status.DraftBots.Count - 1);
+                // Each draft bot owns its own beam list, so a marker with a failed beam never shifts the undo.
+                if (status.DraftBotBeams.Count > 0)
+                {
+                    foreach (var index in status.DraftBotBeams[^1])
+                        RemoveBeam(index);
+                    status.DraftBotBeams.RemoveAt(status.DraftBotBeams.Count - 1);
+                }
+                PrintEditorChat(player, "addbot.undone", status.DraftBots.Count);
+                return;
+            }
+            case "clear":
+                ClearDraftBots(slot);
+                PrintEditorChat(player, "addbot.cleared");
+                return;
+            case "save":
+                SaveDraftBots(player);
+                return;
+            default:
+                PrintEditorChat(player, "addbot.help");
+                return;
+        }
+    }
+
+    private static void RemoveBeam(int index)
+    {
+        var beam = Utilities.GetEntityFromIndex<CBeam>(index);
+        if (beam != null && beam.IsValid)
+            beam.Remove();
+    }
+
+    /// <summary>Lime marker: a post from the feet up to head height and a stub showing the facing direction.</summary>
+    private static void DrawDraftBotMarker(PlayerStatus status, RouteEditor.DraftBot bot)
+    {
+        var height = bot.Crouch ? DraftMarkerCrouchHeight : DraftMarkerStandHeight;
+        var feet = new Vector(bot.X, bot.Y, bot.Z);
+        var head = new Vector(bot.X, bot.Y, bot.Z + height);
+        var yaw = bot.Yaw * MathF.PI / 180f;
+        var nose = new Vector(bot.X + MathF.Cos(yaw) * DraftMarkerFacingLength, bot.Y + MathF.Sin(yaw) * DraftMarkerFacingLength, bot.Z + height);
+
+        var beams = new List<int>();
+        foreach (var (from, to) in new[] { (feet, head), (head, nose) })
+        {
+            var index = DrawBeam(from, to, System.Drawing.Color.Lime);
+            if (index != -1)
+                beams.Add(index);
+        }
+        status.DraftBotBeams.Add(beams);
+    }
+
+    private void ClearDraftBots(int slot)
+    {
+        if (!_playerStatuses.TryGetValue(slot, out var status))
+            return;
+        status.DraftBots.Clear();
+        foreach (var marker in status.DraftBotBeams)
+            foreach (var index in marker)
+                RemoveBeam(index);
+        status.DraftBotBeams.Clear();
+    }
+
+    private void SaveDraftBots(CCSPlayerController player)
+    {
+        var slot = player.Slot;
+        var status = _playerStatuses[slot];
+        var practiceNo = status.PracticeIndex;
+
+        if (practiceNo < 0 || practiceNo >= _practices.Count)
+        {
+            PrintEditorChat(player, "addbot.not_practicing");
+            return;
+        }
+        if (status.DraftBots.Count == 0)
+        {
+            PrintEditorChat(player, "addbot.empty");
+            return;
+        }
+
+        var practice = _practices[practiceNo];
+        var path = $"{ModuleDirectory}/maps/{_mapName}/{practice.PracticeName}.txt";
+        int numBots;
+        try
+        {
+            var lines = RouteEditor.InsertBots(File.ReadAllLines(path), status.DraftBots);
+            numBots = int.Parse(lines[1].Split(new[] { ' ', ',', '\t' }, StringSplitOptions.RemoveEmptyEntries)[0], CultureInfo.InvariantCulture);
+            File.WriteAllLines(path, lines);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Freefrag] Failed to save bots to {path}: {ex.Message}");
+            PrintEditorError(player, "addbot.save_failed");
+            return;
+        }
+
+        var added = status.DraftBots.Count;
+        practice.AppendTargets(status.DraftBots.Select(b => new TargetBot(b.X, b.Y, b.Z, b.Pitch, b.Yaw, 0f, b.Crouch)).ToList(), numBots);
+        ClearDraftBots(slot);
+
+        Console.WriteLine($"[Freefrag] Saved {added} bot(s) to {_mapName}/{practice.PracticeName} ({path})");
+        PrintEditorChat(player, "addbot.saved", added, practice.PracticeName);
+    }
+
+    private void HandleNewRouteCommand(CCSPlayerController player, string name, string botsArg)
+    {
+        if (!_modeGate.Active)
+            return;
+
+        if (name == "")
+        {
+            PrintEditorChat(player, "newroute.help");
+            return;
+        }
+        if (!RouteEditor.IsValidRouteName(name))
+        {
+            PrintEditorChat(player, "newroute.bad_name");
+            return;
+        }
+
+        var numBots = 3;
+        if (botsArg != "" && (!int.TryParse(botsArg, NumberStyles.Integer, CultureInfo.InvariantCulture, out numBots) || numBots < 1 || numBots > MaxNewRouteBots))
+        {
+            PrintEditorChat(player, "newroute.help");
+            return;
+        }
+
+        var path = $"{ModuleDirectory}/maps/{_mapName}/{name}.txt";
+        if (_practiceNameToId.Keys.Any(k => k.Equals(name, StringComparison.OrdinalIgnoreCase)) || File.Exists(path))
+        {
+            PrintEditorChat(player, "newroute.exists", name);
+            return;
+        }
+
+        var pawn = player.PlayerPawn.Value;
+        if (!player.IsValid || !player.PawnIsAlive || pawn == null || pawn.AbsOrigin == null || !Directory.Exists($"{ModuleDirectory}/maps/{_mapName}"))
+        {
+            PrintEditorError(player, "newroute.failed");
+            return;
+        }
+
+        PrefirePractice practice;
+        try
+        {
+            var origin = pawn.AbsOrigin;
+            var angles = pawn.EyeAngles;
+            File.WriteAllLines(path, RouteEditor.NewProfile(numBots, origin.X, origin.Y, origin.Z, angles.X, angles.Y));
+            practice = new PrefirePractice(ModuleDirectory, _mapName, name);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Freefrag] Failed to create route {path}: {ex.Message}");
+            PrintEditorError(player, "newroute.failed");
+            return;
+        }
+
+        var index = _practices.Count;
+        _practices.Add(practice);
+        _practiceNameToId.Add(name, index);
+        _pracConflictCount.Add(index, 0);
+
+        Console.WriteLine($"[Freefrag] Created route {_mapName}/{name} at {path}");
+        PrintEditorChat(player, "newroute.created", name, index + 1);
+    }
+
     /// <summary>True if another player's active route makes this one unavailable. The asking player's own route never blocks them.</summary>
     private bool RouteBlockedByOthers(int slot, int practiceIndex)
     {
@@ -2371,8 +2608,10 @@ public class Freefrag : BasePlugin
             }
             _pracConflictCount[practiceIndex]++;
 
-            // Setup practice
-            AddBot(player, _practices[practiceIndex].NumBots);
+            // Setup practice. A route with no targets yet (just created with newroute) gets no bots:
+            // a bot with nowhere to go is kicked on spawn and that would finish the route at once.
+            if (_practices[practiceIndex].Targets.Count > 0)
+                AddBot(player, _practices[practiceIndex].NumBots);
         }
         else
         {
@@ -2382,11 +2621,16 @@ public class Freefrag : BasePlugin
             // If some bots have already been kicked, add them back.
             var numRemainingBots = _playerStatuses[player.Slot].Bots.Count;
             
-            if (numRemainingBots < _practices[practiceIndex].NumBots)
+            if (numRemainingBots < _practices[practiceIndex].NumBots && _practices[practiceIndex].Targets.Count > 0)
             {
                 _playerStatuses[player.Slot].Progress = 0;
                 AddBot(player, _practices[practiceIndex].NumBots - numRemainingBots);
             }
+        }
+
+        if (_practices[practiceIndex].Targets.Count == 0)
+        {
+            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White}{_translator!.Translate(player, "practice.empty")}");
         }
 
         // Practice begin
@@ -2692,6 +2936,12 @@ public class Freefrag : BasePlugin
                         return;
                     case "record":
                         HandleRecordCommand(player, commandInfo.ArgByIndex(2));
+                        return;
+                    case "addbot":
+                        HandleAddBotCommand(player, commandInfo.ArgByIndex(2));
+                        return;
+                    case "newroute":
+                        HandleNewRouteCommand(player, commandInfo.ArgByIndex(2), commandInfo.ArgByIndex(3));
                         return;
                     case "exit":
                         ForceStopPractice(player);
@@ -3337,7 +3587,8 @@ public class Freefrag : BasePlugin
             {
                 var tmpLocalizedPracticeName = _translator!.Translate(player, $"map.{_mapName}.{_practices[i].PracticeName}");
                 _playerStatuses[player.Slot].LocalizedPracticeNames.Add(tmpLocalizedPracticeName, i);
-                items.Add(new MenuItem(tmpLocalizedPracticeName, p => OnRouteSelect(p, tmpLocalizedPracticeName))); // practice name here is split by space instead of underline. TODO: Use localized text.
+                var done = _playerStatuses[player.Slot].CompletedRoutes.Contains(_practices[i].PracticeName);
+                items.Add(new MenuItem(tmpLocalizedPracticeName, p => OnRouteSelect(p, tmpLocalizedPracticeName), Done: done)); // practice name here is split by space instead of underline. TODO: Use localized text.
             }
         }
         // The player's own active route is already listed by the loop above (RouteBlockedByOthers never
@@ -3357,6 +3608,7 @@ public class Freefrag : BasePlugin
         {
             StopRecording(playerSlot);
             ClearRecording(playerSlot);
+            ClearDraftBots(playerSlot);
             RemoveBots(playerSlot);
             DeleteGuidingLine(playerSlot);
 

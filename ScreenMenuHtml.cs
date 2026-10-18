@@ -8,7 +8,8 @@ public static class ScreenMenuHtml
     private const string Ellipsis = "...";
     private const string Placeholder = "&nbsp;";
 
-    public static string Render(string title, IReadOnlyList<string> labels, MenuCursor cursor, string footer)
+    /// <param name="done">Optional per-row flag; a done row is drawn gray but keeps the selection markers.</param>
+    public static string Render(string title, IReadOnlyList<string> labels, MenuCursor cursor, string footer, IReadOnlyList<bool>? done = null)
     {
         var lines = new List<string>();
 
@@ -30,9 +31,14 @@ public static class ScreenMenuHtml
         for (var i = cursor.WindowStart; i < end; i++)
         {
             var label = Escape(labels[i]);
-            lines.Add(i == cursor.Index
-                ? $"<font color='#FFD700'>&gt; {label} &lt;</font>"
-                : $"<font color='#FFFFFF'>{label}</font>");
+            var isDone = done != null && i < done.Count && done[i];
+            var colored = isDone ? $"<font color='#808080'>{label}</font>" : null;
+            if (i == cursor.Index)
+                lines.Add(isDone
+                    ? $"<font color='#FFD700'>&gt; </font>{colored}<font color='#FFD700'> &lt;</font>"
+                    : $"<font color='#FFD700'>&gt; {label} &lt;</font>");
+            else
+                lines.Add(colored ?? $"<font color='#FFFFFF'>{label}</font>");
         }
 
         if (scrolls)

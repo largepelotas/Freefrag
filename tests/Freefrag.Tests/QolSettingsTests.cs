@@ -32,7 +32,22 @@ public class QolSettingsTests
             Assert.Contains("item_assaultsuit", force);
         }
 
-        Assert.Empty(BotLoadout.ItemsFor(0, random));
+    }
+
+    [Fact]
+    public void BotLoadoutRandomRollsAPresetPerBot()
+    {
+        // Random is decided per spawn, not per round: over many rolls more than one preset shows up,
+        // and every roll is one of the named presets (never empty hands).
+        var random = new Random(3);
+        var seen = new HashSet<string>();
+        for (var i = 0; i < 100; i++)
+        {
+            var items = BotLoadout.ItemsFor(0, random);
+            Assert.NotEmpty(items);
+            seen.Add(items[0]);
+        }
+        Assert.True(seen.Count > 1);
     }
 
     [Fact]

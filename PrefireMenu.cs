@@ -5,8 +5,9 @@ namespace Freefrag;
 /// <summary>
 /// One entry of a menu. Either OnChoose runs when picked, or Submenu (built lazily, when picked)
 /// is opened. Submenu exists so the screen menu can push it as a level that A / Backspace returns from.
+/// Done marks an entry the player has already completed this session; it is drawn dimmed but stays selectable.
 /// </summary>
-public sealed record MenuItem(string Label, Action<CCSPlayerController> OnChoose, Func<MenuSpec>? Submenu = null)
+public sealed record MenuItem(string Label, Action<CCSPlayerController> OnChoose, Func<MenuSpec>? Submenu = null, bool Done = false)
 {
     public static MenuItem Opens(string label, Func<MenuSpec> build) => new(label, _ => { }, build);
 }

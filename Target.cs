@@ -22,7 +22,7 @@ public class PrefirePractice
     public readonly TargetBot Player;
     public readonly string PracticeName;
     public readonly List<string> IncompatiblePractices;
-    public readonly int NumBots;
+    public int NumBots { get; private set; }
     public readonly float SpawnRatio;
     public readonly List<Vector> GuidingLine;
     private static readonly char[] Delimiters = { ' ', ',', '\t' };
@@ -99,6 +99,13 @@ public class PrefirePractice
             GuidingLine.Add(new Vector(p.x, p.y, p.z));
     }
 
+    /// <summary>Adds targets placed in game to the loaded route and updates how many bots are in play at once.</summary>
+    public void AppendTargets(IEnumerable<TargetBot> targets, int numBots)
+    {
+        Targets.AddRange(targets);
+        NumBots = numBots;
+    }
+
     public PrefirePractice(string moduleDirectory, string map, string practice)
     {
         Targets = new List<TargetBot>();
@@ -119,7 +126,7 @@ public class PrefirePractice
             throw new Exception($"[Freefrag] Reading practice file error (1st line): {path}");
         }
             
-        var w = s.Split(Delimiters);
+        var w = s.Split(Delimiters, StringSplitOptions.RemoveEmptyEntries);
         for (var i = 0; i < w.Length; i++)
         {
             IncompatiblePractices.Add(w[i]);

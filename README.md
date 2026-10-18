@@ -72,7 +72,7 @@ Explanation of values:
   - 0: Random mode, randomly spawn some targets.
   - 1: Full mode, all targets.
 - Bot Weapon
-  - 0: Bots buy weapons randomly.
+  - 0: Each bot gets a random preset from the list below (rolled per bot, not per round).
   - 1: Bots use UMP45.
   - 2: Bots use AK47.
   - 3: Bots use Scout.
@@ -318,6 +318,26 @@ Some routes ship without a guiding line (fewer than two joints). Instead of coll
 On a kus/cs2-modded-server install the plugin folder is overwritten on restart, so run
 `scripts/pull-routes.sh` afterwards to copy the changed profiles into `custom_files` and
 into this repo.
+
+## Placing bots and creating routes in game (this fork)
+
+The same applies to bot positions: stand where a bot should be and place it, with no
+`getpos` and no height conversion.
+
+1. `!freefrag newroute <name> [bots]` creates an empty route that starts where you stand
+   (`bots` is how many bots are in play at once, 1-10, default 3). Names use letters, digits, `-`
+   and `_`. The reply gives the route number N. Skip this step to add bots to an existing
+   route.
+2. Start the route: `!freefrag prac N`.
+3. Stand where a bot should be, look where it should face, and type `!freefrag addbot`.
+   It crouches if you are crouching; `addbot crouch` or `addbot stand` overrides that. A green
+   post marks the spot, with a short stub pointing the way the bot will look.
+   `!freefrag addbot undo` removes the last one and `!freefrag addbot clear` discards all.
+4. `!freefrag addbot save` appends the bots to `maps/<map>/<route>.txt`, after the existing
+   targets and ahead of the guiding line. Restart the route to spawn them. Leaving the route
+   discards unsaved bots.
+
+Run `scripts/pull-routes.sh` afterwards, as above.
 
 ## Building (this fork)
 

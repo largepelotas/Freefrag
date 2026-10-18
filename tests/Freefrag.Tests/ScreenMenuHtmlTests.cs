@@ -176,6 +176,20 @@ public class ScreenMenuHtmlTests
     }
 
     [Fact]
+    public void DoneRowsAreGrayAndKeepTheSelectionMarkers()
+    {
+        // A route finished this session is dimmed so the player sees what is left, but it stays
+        // selectable, so the cursor markers must still show on it.
+        var cursor = new MenuCursor(3, 7);
+        cursor.Down();
+        var html = ScreenMenuHtml.Render("T", new[] { "one", "two", "three" }, cursor, "f", new[] { true, true, false });
+
+        Assert.Contains("<font color='#808080'>one</font>", html);
+        Assert.Contains("<font color='#FFD700'>&gt; </font><font color='#808080'>two</font><font color='#FFD700'> &lt;</font>", html);
+        Assert.Contains("<font color='#FFFFFF'>three</font>", html);
+    }
+
+    [Fact]
     public void FooterIsLastAfterABlankLine()
     {
         // Prevents the key legend from running into the last menu row.

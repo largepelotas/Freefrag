@@ -34,16 +34,19 @@ public class PlayerStatus
     public readonly Dictionary<string, int> LocalizedTrainingModeNames = new();
 
     public readonly List<int> EnabledTargets = new();
+    public readonly HashSet<string> CompletedRoutes = new();    // route names finished this session on this map; dimmed in the route menu
     public readonly List<int> Beams = new();
 
     // Guiding-line recorder (!freefrag record)
     public bool IsRecording = false;
     public readonly List<(float x, float y, float z)> RecordedPoints = new();
     public readonly List<int> RecordingBeams = new();
+    public readonly List<RouteEditor.DraftBot> DraftBots = new();
+    public readonly List<List<int>> DraftBotBeams = new();     // one beam list per draft bot, parallel to DraftBots
     public CounterStrikeSharp.API.Modules.Timers.Timer? RecordingTimer = null;
 
     /**
-     * 0: Bots buy weapons randomly.
+     * 0: Each bot gets a random preset from the list below.
      * 1: Bots use UMP45.
      * 2: Bots use AK47.
      * 3: Bots use Scout.

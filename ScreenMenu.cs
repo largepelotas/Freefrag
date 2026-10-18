@@ -181,6 +181,7 @@ public sealed class ScreenMenu
     {
         var (spec, cursor) = menu.Levels.Peek();
         var labels = spec.Items.Select(item => item.Label).ToList();
-        return ScreenMenuHtml.Render(spec.Title, labels, cursor, _footer(player));
+        var done = spec.Items.Select(item => item.Done).ToList();
+        return ScreenMenuHtml.Render(spec.Title, labels, cursor, _footer(player), done);
     }
 }

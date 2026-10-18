@@ -15,9 +15,13 @@ public static class BotLoadout
         _ => null
     };
 
+    /// <summary>
+    /// Items a bot spawns with. Random (0) is rolled per call, so every bot on a route gets its own preset
+    /// instead of the whole round sharing one.
+    /// </summary>
     public static IReadOnlyList<string> ItemsFor(int botWeapon, Random rnd) => botWeapon switch
     {
-        0 => Array.Empty<string>(),
+        0 => ItemsFor(rnd.Next(1, 8), rnd),
         1 => new[] { "weapon_ump45" },
         2 => new[] { "weapon_ak47" },
         3 => new[] { "weapon_ssg08" },
