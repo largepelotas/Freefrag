@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# After recording guiding lines in game (!prefire record save), the plugin writes them into the LIVE
+# After recording guiding lines in game (!freefrag record save), the plugin writes them into the LIVE
 # install, which kus overwrites on every container restart. This script:
 #   1. copies the live maps/ folder into custom_files (so it survives restarts), and
 #   2. pulls it into this repo so the routes can be committed.

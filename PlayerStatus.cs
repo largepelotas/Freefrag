@@ -36,7 +36,7 @@ public class PlayerStatus
     public readonly List<int> EnabledTargets = new();
     public readonly List<int> Beams = new();
 
-    // Guiding-line recorder (!prefire record)
+    // Guiding-line recorder (!freefrag record)
     public bool IsRecording = false;
     public readonly List<(float x, float y, float z)> RecordedPoints = new();
     public readonly List<int> RecordingBeams = new();
@@ -61,6 +61,7 @@ public class PlayerStatus
     public int PendingRoute = -1;
     public bool HeadshotOnly = false;
     public bool Xray = false;
+    public bool MenuBindsUsed = false;                   // A menu navigation command has been seen; the bind hint stops.
     public readonly RunTracker Run = new();
     public readonly Dictionary<int, List<int>> GlowEntities = new();         // bot slot -> entity indices of its glow props
 

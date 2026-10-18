@@ -14,7 +14,7 @@ public class ToggleSettingTests
     [InlineData("OFF", false)]
     public void ExplicitTokensSetTheValueRegardlessOfCurrent(string token, bool expected)
     {
-        // Prevents "!prefire hs on" from flipping the setting off when it is already on (or vice versa).
+        // Prevents "!freefrag hs on" from flipping the setting off when it is already on (or vice versa).
         Assert.Equal(expected, ToggleSetting.Parse(token, true));
         Assert.Equal(expected, ToggleSetting.Parse(token, false));
     }
@@ -22,7 +22,7 @@ public class ToggleSettingTests
     [Fact]
     public void MissingTokenTogglesTheCurrentValue()
     {
-        // Prevents a bare "!prefire hs" from printing usage instead of toggling.
+        // Prevents a bare "!freefrag hs" from printing usage instead of toggling.
         Assert.True(ToggleSetting.Parse("", false));
         Assert.False(ToggleSetting.Parse("", true));
         Assert.True(ToggleSetting.Parse(null, false));
@@ -31,7 +31,7 @@ public class ToggleSettingTests
     [Fact]
     public void InvalidTokenIsRejected()
     {
-        // Prevents a typo such as "!prefire hs maybe" from silently changing the setting.
+        // Prevents a typo such as "!freefrag hs maybe" from silently changing the setting.
         Assert.Null(ToggleSetting.Parse("maybe", false));
         Assert.Null(ToggleSetting.Parse("2", true));
     }

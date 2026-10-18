@@ -20,9 +20,14 @@ public class DefaultConfig
 
     /*
      * 0 = chat menus.
-     * 1 = WASD menus through the WASDMenuAPI plugin; falls back to chat menus when it is not installed.
+     * 1 = screen menus drawn by this plugin in the centre of the screen (W/S/A/D/Tab, or bound keys).
     */
     public int MenuType { get; set; } = 1;
+
+    /*
+     * Rows of a screen menu visible at once (1-8); longer menus scroll.
+    */
+    public int MenuRows { get; set; } = 7;
 
     /*
      * 0 = disabled.
@@ -111,6 +116,11 @@ public class DefaultConfig
                     MenuType = jsonConfig.MenuType;
                 }
 
+                if (jsonConfig.MenuRows > 0 && jsonConfig.MenuRows < 9)
+                {
+                    MenuRows = jsonConfig.MenuRows;
+                }
+
                 if (jsonConfig.BotAimLock > -1 && jsonConfig.BotAimLock < 3)
                 {
                     BotAimLock = jsonConfig.BotAimLock;
@@ -121,7 +131,7 @@ public class DefaultConfig
                     EquipPlayer = jsonConfig.EquipPlayer;
                 }
 
-                Console.WriteLine($"[OpenPrefirePrac] Using default settings: Difficulty = {Difficulty}, TrainingMode = {TrainingMode}, BotWeapon = {BotWeapon}, PlayerGun = {PlayerGun}, Jitter = {Jitter}, HeadshotOnly = {HeadshotOnly}, Xray = {Xray}, MenuType = {MenuType}, BotAimLock = {BotAimLock}, EquipPlayer = {EquipPlayer}");
+                Console.WriteLine($"[OpenPrefirePrac] Using default settings: Difficulty = {Difficulty}, TrainingMode = {TrainingMode}, BotWeapon = {BotWeapon}, PlayerGun = {PlayerGun}, Jitter = {Jitter}, HeadshotOnly = {HeadshotOnly}, Xray = {Xray}, MenuType = {MenuType}, MenuRows = {MenuRows}, BotAimLock = {BotAimLock}, EquipPlayer = {EquipPlayer}");
             }
             catch (System.Exception)
             {

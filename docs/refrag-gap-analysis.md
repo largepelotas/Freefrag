@@ -54,7 +54,7 @@ VPL playlists).
 Hardware is not a constraint: i7-10700 (16 threads), 14 GB RAM with a 6 GB container cap,
 128 tick, 12 slots, one map at a time.
 
-**Live now:** OpenPrefirePrac fork (0.1.48) with `!prefire record`, 9 maps of routes,
+**Live now:** OpenPrefirePrac fork (0.1.48) with `!freefrag record`, 9 maps of routes,
 6 difficulty levels, random/full target mode, bot weapon choice, behaviour-tree hard bots,
 multiplayer concurrent routes. GameModeManager, SimpleAdmin, CustomVotes, InventorySimulator,
 MapConfigurator, RCON.
@@ -80,7 +80,7 @@ MapConfigurator, RCON.
 These are what the subscription buys that no free plugin provides. Ranked by value ÷ effort.
 
 1. **Quality-of-life parity for Prefire** — small, high-impact, all server-side cvars or
-   existing OPP state: `!prefire hs` (`mp_damage_headshot_only`), `!prefire xray` (glow on
+   existing OPP state: `!freefrag hs` (`mp_damage_headshot_only`), `!freefrag xray` (glow on
    targets, prac only), weapon presets (pistol/eco/force/awp instead of one `bw`), `noprimary`,
    `endless`/`repeat N` on one route, `autoskip` after N deaths, random spawn offset
    (`.offangle`: jitter each bot a few units so the spot is learned, not the pixel).
@@ -99,8 +99,8 @@ These are what the subscription buys that no free plugin provides. Ranked by val
    mode because it needs no scripted positions, just `bot_zombie 0`, knife-only and respawn.
 6. **Spray Transfer** — three bots, two spots, reset on fire release; a Prefire route variant
    plus a "did the player stop shooting" check.
-7. **Creator Studio lite** — `!prefire record` already captures guiding lines; extend it to
-   place bots (`!prefire addbot [left|right|static]`) and save a route from in game, so
+7. **Creator Studio lite** — `!freefrag record` already captures guiding lines; extend it to
+   place bots (`!freefrag addbot [left|right|static]`) and save a route from in game, so
    routes stop needing `getpos` + the Python script.
 
 ### B. Add an existing plugin
@@ -120,7 +120,7 @@ These are what the subscription buys that no free plugin provides. Ranked by val
 - **2D demo viewer + aim stats**: CS Demo Manager (free, desktop) does 2D playback, per-match
   stats and heat maps from MatchZy's demos.
 - **Coach / Routines / Academy / Bootcamp / Utility Hub**: content and web product; nothing to
-  host. A `routines.json` that chains `!prefire prac N` steps with timers would be the one
+  host. A `routines.json` that chains `!freefrag prac N` steps with timers would be the one
   server-side piece worth imitating.
 
 ### D. Not realistic to reproduce
@@ -134,7 +134,7 @@ These are what the subscription buys that no free plugin provides. Ranked by val
 ## 4. Suggested order
 
 1. A (1) QoL flags — a few hours, no new systems.
-2. A (2) SQLite scoring + `!prefire top` — makes every later mode measurable.
+2. A (2) SQLite scoring + `!freefrag top` — makes every later mode measurable.
 3. A (5) Waves — proves dynamic bots on the cheap.
 4. A (3) smart difficulty on top of the scores.
 5. A (4) swingers in the route format, then Xfire/Blitz/Clutch as route presets.

@@ -18,11 +18,4 @@
     <PackageReference Include="MaxMind.Db" Version="4.1.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.4" />
   </ItemGroup>
-
-  <ItemGroup>
-    <Reference Include="WASDMenuAPI.Shared">
-      <HintPath>lib/WASDMenuAPI.Shared.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-  </ItemGroup>
 </Project>
