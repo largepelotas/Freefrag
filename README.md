@@ -369,8 +369,10 @@ In game, from a started route:
 A released bot runs toward you and is frozen at its peek point, so put the peek point on the
 path the bot takes out of cover (the corner's exit), reachable within 2 seconds.
 
-Bots only move on the nav mesh. A bot that never moves after being released is reported in the
-server console as `Route <name> target <n> ... never moved`.
+Bots only move on the nav mesh. Two console lines point at a bad spot: `Route <name> target <n>
+... never moved` means the hiding spot itself is off the nav mesh (the bot never even settled
+after its teleport), and `Swinger <bot> on <route> target <n> never reached its peek point; frozen
+after 2 s` means the bot was released but its path never came within 30 units of the peek point.
 
 Limits of this first version: a swinger does not return to cover, and there is no choice of
 swing direction.

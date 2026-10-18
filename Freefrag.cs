@@ -532,6 +532,7 @@ public class Freefrag : BasePlugin
                 if (_playerStatuses.TryGetValue(botOwnerSlot, out var botOwnerStatus))
                 {
                     botOwnerStatus.Bots.Remove(player.Slot);
+                    botOwnerStatus.Swingers.Remove(player.Slot);
                 }
                 _ownerOfBots.Remove(player.Slot);
                 SyncBotQuota();   // The engine removed an owned bot: keep it from refilling the slot.
@@ -674,6 +675,10 @@ public class Freefrag : BasePlugin
                                 RouteName = _practices[practiceIndex].PracticeName,
                                 TargetIndex = _playerStatuses[ownerSlot].EnabledTargets[targetNo],
                             };
+                        }
+                        else if (_playerStatuses.TryGetValue(ownerSlot, out var staticOwner))
+                        {
+                            staticOwner.Swingers.Remove(playerOrBot.Slot);   // a static target after a swinger life must not inherit its state
                         }
                     });
                     AddTimer(0.6f, () => { if (StillOwned()) ApplyGlow(ownerSlot, playerOrBot); });
@@ -1636,7 +1641,7 @@ public class Freefrag : BasePlugin
         SetPlayerFrozen(bot, false);
         state.Released = true;
         state.ReleasedTick = Server.TickCount;
-        Console.WriteLine($"[Freefrag] Released swinger {bot.PlayerName} for slot {ownerSlot} towards its peek point.");
+        Console.WriteLine($"[Freefrag] Released swinger {bot.PlayerName} for slot {ownerSlot} ; it runs at the player and is frozen at its peek point.");
     }
 
     private void FreezeSwinger(int ownerSlot, int botSlot, int tick)
@@ -4254,10 +4259,9 @@ public class Freefrag : BasePlugin
                     swingOwnerStatus.Swingers.Remove(swingBotSlot);     // dead or gone; a respawn creates a fresh state
                     continue;
                 }
-                if (!ownerAlive)
-                    continue;
-
-                if (SwingRelease.ShouldRelease(swingState, ownerFeet!.X, ownerFeet.Y, ownerFeet.Z))
+                // A dead or absent owner releases nothing, but a swinger already running still gets its stop
+                // line and the 2 s cap, so it never keeps running at another player while the owner respawns.
+                if (ownerAlive && SwingRelease.ShouldRelease(swingState, ownerFeet!.X, ownerFeet.Y, ownerFeet.Z))
                     ReleaseSwinger(swingOwnerSlot, swingBotSlot);
                 else if (SwingRelease.Arrived(swingState, botFeet.X, botFeet.Y, botFeet.Z, Server.TickCount))
                     FreezeSwinger(swingOwnerSlot, swingBotSlot, Server.TickCount);

@@ -100,7 +100,7 @@
 										{
 											type = "decorator_picker_nearby"
 											input = "SwingTarget"
-											cutoff_distance = 2000
+											cutoff_distance = 3500
 											child =
 											{
 												type = "condition_is_empty"
