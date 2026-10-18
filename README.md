@@ -107,7 +107,7 @@ Explanation of values:
   - 0: Chat menus (type !1-!9 to choose).
   - 1: Screen menus (default), drawn in the centre of the screen. W/S move, D selects, A goes back, Tab closes. Arrow keys, Enter and Backspace work after a one-time bind; type `!freefrag binds` in chat for the line to paste into the console.
 - MenuRows:
-  - 1-8: Rows of a screen menu shown at once (default 7). Longer menus scroll.
+  - 1-8: Height of a screen menu in rows (default 7). A menu longer than this scrolls, and two of the rows are then used for the "..." scroll markers above and below the entries (a 7-row setting shows 5 entries at a time).
 - GameModesConfig:
   - Path to GameModeManager.json, which the Game modes menu reads (default empty: found automatically in configs/plugins/GameModeManager, up to four folders above the plugin).
 - GameModesPermission:

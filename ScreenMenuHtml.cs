@@ -6,6 +6,7 @@ namespace Freefrag;
 public static class ScreenMenuHtml
 {
     private const string Ellipsis = "...";
+    private const string Placeholder = "&nbsp;";
 
     public static string Render(string title, IReadOnlyList<string> labels, MenuCursor cursor, string footer)
     {
@@ -18,10 +19,14 @@ public static class ScreenMenuHtml
                 lines.Add($"<font color='#7CFC00'><u>{Escape(titleLine)}</u></font>");
         }
 
-        if (cursor.HasMoreAbove)
-            lines.Add(Ellipsis);
+        // A menu longer than Rows always reserves a line above and below the items (blank when nothing
+        // is hidden on that side), so the panel height and the item rows never change while scrolling.
+        var scrolls = cursor.Count > cursor.Rows;
 
-        var end = Math.Min(Math.Min(cursor.WindowStart + cursor.Rows, cursor.Count), labels.Count);
+        if (scrolls)
+            lines.Add(cursor.HasMoreAbove ? Ellipsis : Placeholder);
+
+        var end = Math.Min(Math.Min(cursor.WindowStart + cursor.VisibleRows, cursor.Count), labels.Count);
         for (var i = cursor.WindowStart; i < end; i++)
         {
             var label = Escape(labels[i]);
@@ -30,8 +35,8 @@ public static class ScreenMenuHtml
                 : $"<font color='#FFFFFF'>{label}</font>");
         }
 
-        if (cursor.HasMoreBelow)
-            lines.Add(Ellipsis);
+        if (scrolls)
+            lines.Add(cursor.HasMoreBelow ? Ellipsis : Placeholder);
 
         lines.Add("");
         lines.Add($"<font class='fontSize-s' color='#5FD7FF'>{Escape(footer)}</font>");

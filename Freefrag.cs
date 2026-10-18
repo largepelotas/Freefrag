@@ -2951,15 +2951,19 @@ public class Freefrag : BasePlugin
         gun == "none" ? _translator!.Translate(player, "gunmenu.none") : gun;
 
     /// <summary>
-    /// An option on the More options menu was changed. Screen: rebuild main and put More options back on top
-    /// (Back still returns to main) so its labels show the new value. Chat: close, as for any setting.
+    /// An option on the More options menu was changed. Screen: rebuild the More options level in place so its
+    /// labels show the new value and the cursor stays on the row just changed; when the change was made in a
+    /// submenu of More options, step back out of it first. Chat: close, as for any setting.
     /// </summary>
-    private void AfterMoreOptionChosen(CCSPlayerController player)
+    private void AfterMoreOptionChosen(CCSPlayerController player, bool fromSubmenu = false)
     {
-        if (CloseScreenMenu(player))
+        if (UseScreenMenu())
         {
-            OpenMenu(player, BuildMainMenu(player));
-            _screenMenu!.Push(player, BuildMoreOptionsMenu(player));
+            if (fromSubmenu)
+            {
+                _screenMenu!.Back(player);
+            }
+            _screenMenu!.Replace(player, BuildMoreOptionsMenu(player));
         }
         else
         {
@@ -3028,7 +3032,7 @@ public class Freefrag : BasePlugin
             items.Add(new MenuItem(GunLabel(player, choice), p =>
             {
                 SetPlayerGun(p, choice);
-                AfterMoreOptionChosen(p);
+                AfterMoreOptionChosen(p, fromSubmenu: true);
             }));
         }
 
@@ -3044,7 +3048,7 @@ public class Freefrag : BasePlugin
             items.Add(new MenuItem(OffOrNumber(choice), p =>
             {
                 SetJitter(p, choice);
-                AfterMoreOptionChosen(p);
+                AfterMoreOptionChosen(p, fromSubmenu: true);
             }));
         }
 
@@ -3060,7 +3064,7 @@ public class Freefrag : BasePlugin
             items.Add(new MenuItem(RepeatSetting.DisplayName(choice), p =>
             {
                 SetRepeat(p, choice);
-                AfterMoreOptionChosen(p);
+                AfterMoreOptionChosen(p, fromSubmenu: true);
             }));
         }
 
@@ -3076,7 +3080,7 @@ public class Freefrag : BasePlugin
             items.Add(new MenuItem(OffOrNumber(choice), p =>
             {
                 SetAutoSkip(p, choice);
-                AfterMoreOptionChosen(p);
+                AfterMoreOptionChosen(p, fromSubmenu: true);
             }));
         }
 
@@ -3092,7 +3096,7 @@ public class Freefrag : BasePlugin
             items.Add(new MenuItem(choice.ToString(), p =>
             {
                 SetBotHealth(p, choice);
-                AfterMoreOptionChosen(p);
+                AfterMoreOptionChosen(p, fromSubmenu: true);
             }));
         }
 
@@ -3108,7 +3112,7 @@ public class Freefrag : BasePlugin
             items.Add(new MenuItem(choice.ToString(), p =>
             {
                 SetBotArmor(p, choice);
-                AfterMoreOptionChosen(p);
+                AfterMoreOptionChosen(p, fromSubmenu: true);
             }));
         }
 
@@ -3124,7 +3128,7 @@ public class Freefrag : BasePlugin
             items.Add(new MenuItem(OffOrNumber(choice), p =>
             {
                 SetCountdown(p, choice);
-                AfterMoreOptionChosen(p);
+                AfterMoreOptionChosen(p, fromSubmenu: true);
             }));
         }
 

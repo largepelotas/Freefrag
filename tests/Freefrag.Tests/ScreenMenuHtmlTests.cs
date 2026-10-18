@@ -31,20 +31,88 @@ public class ScreenMenuHtmlTests
         var fits = ScreenMenuHtml.Render("T", new[] { "x", "y" }, new MenuCursor(2, 7), "f");
         Assert.DoesNotContain("...", fits);
 
-        var top = new MenuCursor(10, 4);
+        var top = new MenuCursor(10, 6);
         var topLines = Lines(ScreenMenuHtml.Render("T", Ten, top, "f"));
         Assert.Equal(1, topLines.Count(l => l == "..."));
         Assert.Equal("...", topLines[^3]);   // Just below the visible rows, above the blank line and footer.
 
-        var bottom = new MenuCursor(10, 4);
+        var bottom = new MenuCursor(10, 6);
         bottom.Up();
         var bottomLines = Lines(ScreenMenuHtml.Render("T", Ten, bottom, "f"));
         Assert.Equal(1, bottomLines.Count(l => l == "..."));
         Assert.Equal("...", bottomLines[1]);   // Just under the title.
 
-        var middle = new MenuCursor(10, 4);
+        var middle = new MenuCursor(10, 6);
         for (var i = 0; i < 5; i++) middle.Down();
         Assert.Equal(2, Lines(ScreenMenuHtml.Render("T", Ten, middle, "f")).Count(l => l == "..."));
+    }
+
+    [Fact]
+    public void ScrollingMenuUsesPlaceholderWhereNothingIsHidden()
+    {
+        // Prevents the item rows shifting by a line when a marker appears or disappears.
+        var top = Lines(ScreenMenuHtml.Render("T", Ten, new MenuCursor(10, 6), "f"));
+        Assert.Equal("&nbsp;", top[1]);
+        Assert.Equal("...", top[^3]);
+
+        var bottomCursor = new MenuCursor(10, 6);
+        bottomCursor.Up();
+        var bottom = Lines(ScreenMenuHtml.Render("T", Ten, bottomCursor, "f"));
+        Assert.Equal("...", bottom[1]);
+        Assert.Equal("&nbsp;", bottom[^3]);
+    }
+
+    [Fact]
+    public void NonScrollingMenuEmitsNoMarkerLines()
+    {
+        // Prevents extra blank lines on menus that fit within Rows.
+        var lines = Lines(ScreenMenuHtml.Render("T", new[] { "x", "y" }, new MenuCursor(2, 7), "f"));
+
+        Assert.DoesNotContain("&nbsp;", lines);
+        Assert.Equal(1 + 2 + 2, lines.Count);   // title, two rows, blank, footer
+    }
+
+    [Fact]
+    public void LineCountIsConstantAcrossTheWholeScrollRangeAndNeverExceedsRows()
+    {
+        // Prevents the panel growing taller as the window scrolls (the bottom row gets clipped).
+        var labels = Enumerable.Range(0, 12).Select(i => $"item{i}").ToList();
+        var cursor = new MenuCursor(12, 7);
+        var counts = new HashSet<int>();
+
+        for (var step = 0; step < 30; step++)
+        {
+            var lines = Lines(ScreenMenuHtml.Render("T", labels, cursor, "f"));
+            counts.Add(lines.Count);
+            Assert.Contains(lines, l => l.Contains($"&gt; item{cursor.Index} &lt;"));
+            Assert.Equal(1, lines.Count(l => l.Contains("&gt; ")));
+            cursor.Down();
+        }
+        for (var step = 0; step < 30; step++)
+        {
+            var lines = Lines(ScreenMenuHtml.Render("T", labels, cursor, "f"));
+            counts.Add(lines.Count);
+            Assert.Contains(lines, l => l.Contains($"&gt; item{cursor.Index} &lt;"));
+            cursor.Up();
+        }
+
+        Assert.Single(counts);
+        Assert.Equal(1 + 7 + 2, counts.Single());   // title + Rows (items + two marker lines) + blank + footer
+    }
+
+    [Fact]
+    public void FirstVisibleItemIsAlwaysOnTheSameLine()
+    {
+        // Prevents rows shifting under the cursor when a marker toggles: the first item is always line 2.
+        var labels = Enumerable.Range(0, 12).Select(i => $"item{i}").ToList();
+        var cursor = new MenuCursor(12, 7);
+
+        for (var step = 0; step < 14; step++)
+        {
+            var lines = Lines(ScreenMenuHtml.Render("T", labels, cursor, "f"));
+            Assert.Contains($"item{cursor.WindowStart}", lines[2]);
+            cursor.Down();
+        }
     }
 
     [Fact]
@@ -72,7 +140,7 @@ public class ScreenMenuHtmlTests
     public void ShowsExactlyRowsLabelsWhenThereAreMore()
     {
         // Prevents a long menu from dumping every entry into the centre HTML (it would overflow the screen).
-        var cursor = new MenuCursor(10, 4);
+        var cursor = new MenuCursor(10, 6);
 
         var html = ScreenMenuHtml.Render("T", Ten, cursor, "f");
 
@@ -84,7 +152,7 @@ public class ScreenMenuHtmlTests
     public void ScrolledWindowShowsTheRowsAroundTheSelection()
     {
         // Prevents the rendered rows disagreeing with the cursor's window after scrolling.
-        var cursor = new MenuCursor(10, 4);
+        var cursor = new MenuCursor(10, 6);
         for (var i = 0; i < 6; i++) cursor.Down();    // index 6, window 3..6
 
         var html = ScreenMenuHtml.Render("T", Ten, cursor, "f");
