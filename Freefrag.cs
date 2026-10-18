@@ -628,12 +628,16 @@ public class Freefrag : BasePlugin
                         var (dx, dy) = SpawnJitter.Offset(_playerStatuses[ownerSlot].Jitter, new Random());
                         position = new Vector(position.X + dx, position.Y + dy, position.Z);
                     }
+                    // The bot can be kicked (route exit, going dormant) before these timers fire and another
+                    // mode's bot can take the slot; none of them may act on a bot Freefrag no longer owns.
+                    bool StillOwned() => _modeGate.Active && _ownerOfBots.ContainsKey(playerOrBot.Slot);
                     AddTimer(0.55f, () =>
                     {
+                        if (!StillOwned()) return;
                         MovePlayer(playerOrBot, target.IsCrouching, position, target.Rotation);
                         _landingWatches[playerOrBot.Slot] = new LandingWatch(Server.TickCount);
                     });
-                    AddTimer(0.6f, () => ApplyGlow(ownerSlot, playerOrBot));
+                    AddTimer(0.6f, () => { if (StillOwned()) ApplyGlow(ownerSlot, playerOrBot); });
                     
 
                     // Give bot weapons. With bots-fire off the bot is stripped and gets nothing back
@@ -654,7 +658,7 @@ public class Freefrag : BasePlugin
                     // Bot health and armor. Applied after the loadout and mp_free_armor have run, so ours wins.
                     var botHealth = _playerStatuses[ownerSlot].BotHealth;
                     var botArmor = _playerStatuses[ownerSlot].BotArmor;
-                    AddTimer(0.45f, () => ApplyBotVitals(playerOrBot, botHealth, botArmor));
+                    AddTimer(0.45f, () => { if (StillOwned()) ApplyBotVitals(playerOrBot, botHealth, botArmor); });
 
                     // Try to increase bot difficulty
                     // playerOrBot.beha
