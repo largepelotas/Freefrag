@@ -36,7 +36,11 @@ There are also some shortcut commands you can use.
   - !prefire map [map name]: Switch to another map.
   - !prefire df [1-6]: Set the difficulty.
   - !prefire mode [rand/full]: Set training mode.
-  - !prefire bw [rand/ump/ak/sct/awp]: Set weapons for bots.
+  - !prefire bw [rand/ump/ak/sct/awp/pistol/eco/force]: Set weapons for bots.
+  - !prefire gun [ak/m4/m4a1s/awp/deagle/usp/glock/none]: Set your weapon.
+  - !prefire jitter [0-64]: Set bot spawn offset.
+  - !prefire repeat [n/inf/off]: Repeat the current route.
+  - !prefire autoskip [n/off]: Skip route after deaths.
   - !prefire lang [en/pt/zh]: Set language. en for English, pt para português, 中文选择 zh。
   - !prefire exit: Stop practicing.
 
@@ -64,6 +68,9 @@ Explanation of values:
   - 2: Bots use AK47.
   - 3: Bots use Scout.
   - 4: Bots use AWP.
+  - 5: Bots use Pistols.
+  - 6: Bots use Eco weapons.
+  - 7: Bots use Force-buy weapons.
 - Aim lock for bots
   - 0: CS2's native bot behavior. It works in a consistant manner but is less powerful.
   - 1: CSS based aim lock: Bots always aim at players' heads. But this may conflict with CS2's native bot logic, causing bots to not react under certain circumstances.
