@@ -82,7 +82,7 @@
 										}
 									}
 								},
-							// Else: attack if we see an enemy; a walking bot with no enemy runs to the nearest swing marker
+							// Else: attack if we see an enemy; a walking bot with no enemy runs at the nearest human (spike fallback)
 							{
 								type = "selector"
 								children =
@@ -94,13 +94,7 @@
 									},
 									{
 										type = "decorator_sensor"
-										shape =
-										{
-											type = "sensor_shape_sphere"
-											radius = 2000
-										}
-										entity_type_filter = "CLASSNAME"
-										class_name = "info_target"
+										entity_type_filter = "HUMAN_PLAYERS"
 										output = "SwingMarkers"
 										child =
 										{
