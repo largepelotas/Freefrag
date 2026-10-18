@@ -64,6 +64,8 @@ public class Translator
     {
         var steamId = player.SteamID;
 
+        if (!_languageManager.ContainsKey(steamId))
+            _languageManager[steamId] = _defaultCulture;
         var playerCulture = _languageManager[steamId];
 
         using (new WithTemporaryCulture(CultureInfo.GetCultureInfo(playerCulture)))
@@ -76,6 +78,8 @@ public class Translator
     {
         var steamId = player.SteamID;
 
+        if (!_languageManager.ContainsKey(steamId))
+            _languageManager[steamId] = _defaultCulture;
         var playerCulture = _languageManager[steamId];
 
         using (new WithTemporaryCulture(CultureInfo.GetCultureInfo(playerCulture)))

@@ -36,6 +36,12 @@ public class PlayerStatus
     public readonly List<int> EnabledTargets = new();
     public readonly List<int> Beams = new();
 
+    // Guiding-line recorder (!prefire record)
+    public bool IsRecording = false;
+    public readonly List<(float x, float y, float z)> RecordedPoints = new();
+    public readonly List<int> RecordingBeams = new();
+    public CounterStrikeSharp.API.Modules.Timers.Timer? RecordingTimer = null;
+
     /**
      * 0: Bots buy weapons randomly.
      * 1: Bots use UMP45.

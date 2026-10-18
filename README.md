@@ -260,3 +260,26 @@ I have referred these open-source projects during the development.
 This project is inspired by a close-source prefire plugin developed by https://space.bilibili.com/283758782.
 
 Huge thanks.
+
+## Recording guiding lines in game (this fork)
+
+Some routes ship without a guiding line (fewer than two joints). Instead of collecting
+`getpos` output by hand, record it while playing:
+
+1. Start the route: `!prefire prac N`.
+2. `!prefire record` and walk the route the way it is meant to be played. You cannot take
+   damage while recording, so the bots will not interrupt. A green line is drawn behind you
+   as you go (one joint every 50 units). `!prefire record` again pauses.
+3. `!prefire record save` writes the joints into `maps/<map>/<route>.txt`, replacing any
+   existing guiding line, and redraws the blue line immediately. `!prefire record clear`
+   discards. Leaving the route also discards an unsaved recording.
+
+On a kus/cs2-modded-server install the plugin folder is overwritten on restart, so run
+`scripts/pull-routes.sh` afterwards to copy the changed profiles into `custom_files` and
+into this repo.
+
+## Building (this fork)
+
+CounterStrikeSharp 1.0.3xx targets .NET 10. `scripts/build-on-server.sh` runs tests and
+`dotnet publish` inside the official SDK container on the game server, and
+`scripts/deploy.sh` copies the plugin files into the install and hot-reloads it.

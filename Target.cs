@@ -27,6 +27,78 @@ public class PrefirePractice
     public readonly List<Vector> GuidingLine;
     private static readonly char[] Delimiters = { ' ', ',', '\t' };
 
+    /// <summary>A profile line that is exactly three real numbers is a joint of the guiding line.</summary>
+    public static bool IsGuidingLinePoint(string line)
+    {
+        var w = line.Split(Delimiters, StringSplitOptions.RemoveEmptyEntries);
+        if (w.Length != 3) return false;
+        foreach (var token in w)
+        {
+            if (!float.TryParse(token, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _))
+                return false;
+        }
+        return true;
+    }
+
+    public static string FormatGuidingLinePoint((float x, float y, float z) p)
+    {
+        var c = System.Globalization.CultureInfo.InvariantCulture;
+        return $"{p.x.ToString("F6", c)} {p.y.ToString("F6", c)} {p.z.ToString("F6", c)}";
+    }
+
+    /// <summary>Returns the profile with every existing guiding-line joint removed and the new points appended.</summary>
+    public static List<string> RewriteProfileWithGuidingLine(IEnumerable<string> profileLines, IEnumerable<(float x, float y, float z)> points)
+    {
+        var result = new List<string>();
+        foreach (var line in profileLines)
+        {
+            if (!IsGuidingLinePoint(line))
+                result.Add(line);
+        }
+        // Drop trailing blank lines so the joints follow the last target directly.
+        while (result.Count > 0 && string.IsNullOrWhiteSpace(result[^1]))
+            result.RemoveAt(result.Count - 1);
+        foreach (var p in points)
+            result.Add(FormatGuidingLinePoint(p));
+        return result;
+    }
+
+    public static bool FarEnough((float x, float y, float z) a, (float x, float y, float z) b, float minDistance)
+    {
+        var dx = a.x - b.x; var dy = a.y - b.y; var dz = a.z - b.z;
+        return dx * dx + dy * dy + dz * dz >= minDistance * minDistance;
+    }
+
+    /// <summary>
+    /// Whether a candidate route is blocked by OTHER players. The server-wide conflict counter also
+    /// includes the asking player's own active route (itself plus everything it lists as incompatible),
+    /// which must not stop that player from switching.
+    /// </summary>
+    public static bool BlockedByOthers(int conflictCount, int ownPractice, int candidate, IReadOnlyList<string> ownIncompatible, string candidateName)
+    {
+        var ownContribution = 0;
+        if (ownPractice > -1)
+        {
+            if (ownPractice == candidate)
+                ownContribution = 1;
+            else
+            {
+                foreach (var name in ownIncompatible)
+                {
+                    if (name == candidateName) { ownContribution++; }
+                }
+            }
+        }
+        return conflictCount - ownContribution > 0;
+    }
+
+    public void ReplaceGuidingLine(IEnumerable<(float x, float y, float z)> points)
+    {
+        GuidingLine.Clear();
+        foreach (var p in points)
+            GuidingLine.Add(new Vector(p.x, p.y, p.z));
+    }
+
     public PrefirePractice(string moduleDirectory, string map, string practice)
     {
         Targets = new List<TargetBot>();

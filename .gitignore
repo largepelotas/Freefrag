@@ -2,3 +2,6 @@
 /bin
 /obj
 /OpenPrefirePrac.sln.DotSettings.user
+bin/
+obj/
+out/
