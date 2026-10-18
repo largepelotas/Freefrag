@@ -48,6 +48,8 @@ public class Freefrag : BasePlugin
     private ScoreRepository? _scores;
 
     private readonly BotRequestQueue _botRequests = new();        // One player's bots spawn at a time; see BotRequestQueue.
+    private readonly Dictionary<int, LandingWatch> _landingWatches = new();   // Key: bot slot. Bots waiting to touch ground before FreezeBot.
+    private const uint FL_ONGROUND = 1u << 0;
 
     private const float BotSpawnInterval = 0.1f;
     private const float BotSpawnTimeout = 8f;                      // Seconds after the last bot_add before an unfulfilled request is dropped.
@@ -60,6 +62,14 @@ public class Freefrag : BasePlugin
     private ScreenMenu ?_screenMenu;                                // In-plugin centre-screen menus (MenuType 1); created in Load.
 
     private CounterStrikeSharp.API.Modules.Timers.Timer ?_timerBroadcastProgress;
+
+    private CounterStrikeSharp.API.Modules.Timers.Timer ?_strayBotSweep;
+    private bool _quotaHoldLogged;                                  // The bot_quota self-heal has been reported once already.
+    private const float StrayBotSweepInterval = 5f;                 // Seconds between sweeps for bots no practicing player owns.
+
+    // bot_add timers per owner slot, so a bot request that is dropped or whose owner leaves cannot
+    // still deliver a bot afterwards.
+    private readonly Dictionary<int, List<CounterStrikeSharp.API.Modules.Timers.Timer>> _botAddTimers = new();
 
     private int _glowCount;                                         // Bots currently wearing an x-ray glow; lets CheckTransmit skip all work when zero.
 
@@ -232,10 +242,28 @@ public class Freefrag : BasePlugin
         }
 
         Console.WriteLine($"[Freefrag] Mode {modeName ?? "none"} from {source}: Freefrag is now {(transition == ModeTransition.Activated ? "active" : "dormant")}.");
-        if (transition == ModeTransition.Deactivated)
+        var actions = BotOwnershipPolicy.ForTransition(transition);
+        if (actions.HasFlag(OwnershipAction.StopSweep))
         {
             EnterDormant();
         }
+        if (actions.HasFlag(OwnershipAction.StartSweep))
+        {
+            EnterActive();
+        }
+    }
+
+    /// <summary>
+    /// Prefire became the mode: the plugin owns every bot from here on. No engine-managed quota, and anything that
+    /// joins without a practicing player's request is a stray and gets swept. Never done outside Prefire: other modes
+    /// (deathmatch sets bot_quota 10) rely on their own quota. A hot reload during Prefire gets here through Load().
+    /// </summary>
+    private void EnterActive()
+    {
+        Server.ExecuteCommand("bot_quota 0");
+        Server.ExecuteCommand("bot_quota_mode normal");
+        _strayBotSweep ??= AddTimer(StrayBotSweepInterval, KickStrayBots, TimerFlags.REPEAT);
+        AddTimer(1f, KickStrayBots);   // Bots that were already on the server when Prefire became active.
     }
 
     /// <summary>
@@ -304,6 +332,24 @@ public class Freefrag : BasePlugin
         }
 
         _botRequests.Clear();
+
+        // Stop owning bots: no sweep, no pending bot_add, no landing watches. Kick only the bots this plugin owns
+        // (normally none are left after the exit path above); never unowned ones, and bot_quota is left alone.
+        if (_strayBotSweep != null)
+        {
+            _strayBotSweep.Kill();
+            _strayBotSweep = null;
+        }
+        foreach (var ownerSlot in _botAddTimers.Keys.ToList())
+        {
+            CancelBotAddTimers(ownerSlot);
+        }
+        _landingWatches.Clear();
+        foreach (var botSlot in _ownerOfBots.Keys.ToList())
+        {
+            KickBot(botSlot);
+        }
+
         DiscardSavedConvars();
     }
 
@@ -320,6 +366,38 @@ public class Freefrag : BasePlugin
     public override void Unload(bool hotReload)
     {
         try { ScoreRepository.ReleaseAll(); } catch (Exception) { }
+
+        // While Prefire is active the plugin owns every bot, so none may survive it. Dormant, the mode's bots stay.
+        if (_strayBotSweep != null)
+        {
+            _strayBotSweep.Kill();
+            _strayBotSweep = null;
+        }
+
+        foreach (var ownerSlot in _botAddTimers.Keys.ToList())
+        {
+            CancelBotAddTimers(ownerSlot);
+        }
+
+        if (BotOwnershipPolicy.KickAllOnUnload(_modeGate.Active))
+        {
+            foreach (var bot in Utilities.GetPlayers())
+            {
+                if (bot == null || !bot.IsValid || !bot.IsBot || bot.IsHLTV) continue;
+
+                if (bot.UserId.HasValue)
+                    Server.ExecuteCommand($"kickid {bot.UserId.Value}");
+                else
+                    Server.ExecuteCommand($"bot_kick {bot.PlayerName}");
+            }
+        }
+
+        _ownerOfBots.Clear();
+        foreach (var status in _playerStatuses.Values)
+        {
+            status.Bots.Clear();
+        }
+        _landingWatches.Clear();
 
         UnregisterCommand();
         _screenMenu?.Clear();
@@ -380,8 +458,9 @@ public class Freefrag : BasePlugin
 
         if (player.IsBot)
         {
-            // For bots: If someone is practicing and it's an unmanaged bot, add or kick the bot
-            if (_modeGate.Active && _playerCount > 0 && !_ownerOfBots.ContainsKey(slot))
+            // For bots: the plugin owns every bot while Prefire is active, so an unmanaged bot is kicked
+            // whenever no request claims it (Claim returns null on an empty queue). Dormant: other modes' bots are left alone.
+            if (_modeGate.Active && !_ownerOfBots.ContainsKey(slot))
             {
                 // Only the active request's bots are being spawned, so this bot belongs to its owner
                 // unless the bot's team says otherwise (then it came from somewhere else).
@@ -427,6 +506,23 @@ public class Freefrag : BasePlugin
         if (player == null)
         {
             // Console.WriteLine("[Freefrag] OnPlayerDisconnect doesn't work now. Player = null.");
+            return HookResult.Continue;
+        }
+
+        // Bots the engine removes without us (map change, bot_quota changes): drop their records.
+        // A no-op after KickBot already dropped them.
+        if (player.IsBot)
+        {
+            if (_ownerOfBots.TryGetValue(player.Slot, out var botOwnerSlot))
+            {
+                RemoveGlow(botOwnerSlot, player.Slot);
+                if (_playerStatuses.TryGetValue(botOwnerSlot, out var botOwnerStatus))
+                {
+                    botOwnerStatus.Bots.Remove(player.Slot);
+                }
+                _ownerOfBots.Remove(player.Slot);
+            }
+            _landingWatches.Remove(player.Slot);
             return HookResult.Continue;
         }
 
@@ -525,8 +621,6 @@ public class Freefrag : BasePlugin
                     _playerStatuses[ownerSlot].Progress++;
                     // Console.WriteLine($"[Freefrag] DEBUG: Update progress to {_playerStatuses[owner].Progress}.");
 
-                    AddTimer(0.5f, () => FreezeBot(playerOrBot));
-
                     var target = _practices[practiceIndex].Targets[_playerStatuses[ownerSlot].EnabledTargets[targetNo]];
                     var position = target.Position;
                     if (_playerStatuses[ownerSlot].Jitter > 0)
@@ -534,7 +628,11 @@ public class Freefrag : BasePlugin
                         var (dx, dy) = SpawnJitter.Offset(_playerStatuses[ownerSlot].Jitter, new Random());
                         position = new Vector(position.X + dx, position.Y + dy, position.Z);
                     }
-                    AddTimer(0.55f, () => MovePlayer(playerOrBot, target.IsCrouching, position, target.Rotation));
+                    AddTimer(0.55f, () =>
+                    {
+                        MovePlayer(playerOrBot, target.IsCrouching, position, target.Rotation);
+                        _landingWatches[playerOrBot.Slot] = new LandingWatch(Server.TickCount);
+                    });
                     AddTimer(0.6f, () => ApplyGlow(ownerSlot, playerOrBot));
                     
 
@@ -645,6 +743,7 @@ public class Freefrag : BasePlugin
                 // For managed bots
                 int ownerSlot = _ownerOfBots[playerOrBot.Slot];
                 RemoveGlow(ownerSlot, playerOrBot.Slot);
+                _landingWatches.Remove(playerOrBot.Slot);
                 var targetNo = _playerStatuses[ownerSlot].Progress;
                 var practiceIndex = _playerStatuses[ownerSlot].PracticeIndex;
 
@@ -1201,6 +1300,9 @@ public class Freefrag : BasePlugin
 
     private void ResetBots(int slot)
     {
+        foreach (var watchedBot in _playerStatuses[slot].Bots)
+            _landingWatches.Remove(watchedBot);
+
         _playerStatuses[slot].Progress = 0;
 
         List<int> botsToDelete = new List<int>();
@@ -1340,9 +1442,14 @@ public class Freefrag : BasePlugin
         var addCommand = issue.BotTeam == BotRequestQueue.TeamT ? "bot_add_t" : "bot_add_ct";
         Console.WriteLine($"[Freefrag] Creating {issue.Count} {joinTeam} bots for player slot {issue.OwnerSlot}.");
 
+        // Timers of an earlier request of this owner must not deliver bots for this one.
+        CancelBotAddTimers(issue.OwnerSlot);
+        var timers = new List<CounterStrikeSharp.API.Modules.Timers.Timer>();
+        _botAddTimers[issue.OwnerSlot] = timers;
+
         for (var i = 0; i < issue.Count; i++)
         {
-            AddTimer(i * BotSpawnInterval, () => {
+            timers.Add(AddTimer(i * BotSpawnInterval, () => {
                 if (!_modeGate.Active)
                 {
                     return;
@@ -1350,11 +1457,11 @@ public class Freefrag : BasePlugin
 
                 Server.ExecuteCommand($"bot_join_team {joinTeam}");
                 Server.ExecuteCommand(addCommand);
-            });
+            }));
         }
 
         // If the bots never show up (server full, bot_quota, ...) the request must not block everyone else.
-        AddTimer(issue.Count * BotSpawnInterval + BotSpawnTimeout, () => {
+        timers.Add(AddTimer(issue.Count * BotSpawnInterval + BotSpawnTimeout, () => {
             if (!_modeGate.Active)
             {
                 return;
@@ -1364,16 +1471,31 @@ public class Freefrag : BasePlugin
             if (dropped > 0)
             {
                 Console.WriteLine($"[Freefrag] Bot request of player slot {issue.OwnerSlot} timed out with {dropped} bots missing; dropping it.");
+                CancelBotAddTimers(issue.OwnerSlot);
             }
             if (next != null)
             {
                 IssueBotRequest(next);
             }
-        });
+        }));
+    }
+
+    private void CancelBotAddTimers(int ownerSlot)
+    {
+        if (!_botAddTimers.Remove(ownerSlot, out var timers))
+        {
+            return;
+        }
+
+        foreach (var timer in timers)
+        {
+            timer.Kill();
+        }
     }
 
     private void DropBotRequest(int playerSlot)
     {
+        CancelBotAddTimers(playerSlot);
         var next = _botRequests.Remove(playerSlot);
         if (next != null)
         {
@@ -1409,6 +1531,12 @@ public class Freefrag : BasePlugin
         player.PlayerPawn.Value.Teleport(pos, ang, Vector.Zero);
     }
 
+    // MOVETYPE_VPHYSICS halts all simulation on the pawn (no gravity, no movement), so it must only
+    // be applied once the bot has landed. The landing watch in OnTickHandler does that: it waits for
+    // ground contact after the route teleport and then calls this. A pawn frozen while FL_ONGROUND is
+    // set keeps that flag, so weapon accuracy is the standing value rather than the airborne one.
+    // MOVETYPE_NONE was considered as an alternative, but VPHYSICS is the known-good state that still
+    // lets bots aim and fire, so it stays.
     private void FreezeBot(CCSPlayerController? bot)
     {
         // Console.WriteLine($"[Freefrag] DEBUG: Trying to freeze a bot.");
@@ -1418,6 +1546,9 @@ public class Freefrag : BasePlugin
         )
         {
             // Console.WriteLine($"[Freefrag] DEBUG: Bot {bot.PlayerName} freezed.");
+
+            // Kill any residual velocity first; VPHYSICS would otherwise keep it.
+            bot.PlayerPawn.Value.Teleport(null, null, Vector.Zero);
 
             // bot.PlayerPawn.Value.MoveType = MoveType_t.MOVETYPE_OBSOLETE;
             bot.PlayerPawn.Value.MoveType = MoveType_t.MOVETYPE_VPHYSICS;
@@ -1983,8 +2114,10 @@ public class Freefrag : BasePlugin
     private void RestoreConvars()
     {
         // Bool convars
+        // Convars the plugin keeps while Prefire is active (bot_quota, ...) are skipped; see ConvarRestore.
         foreach (var convar in _serverStatus.BoolConvars)
         {
+            if (!ConvarRestore.ShouldRestore(convar.Key)) continue;
             // var tmpConvar = ConVar.Find(convar.Key);
             // tmpConvar!.SetValue(convar.Value);
             Server.ExecuteCommand(convar.Key + " " + convar.Value.ToString());
@@ -1994,6 +2127,7 @@ public class Freefrag : BasePlugin
         // Int convars
         foreach (var convar in _serverStatus.IntConvars)
         {
+            if (!ConvarRestore.ShouldRestore(convar.Key)) continue;
             // var tmpConvar = ConVar.Find(convar.Key);
             // Somehow the following 2 methods don't work, just make up a command to implement this.
             Server.ExecuteCommand(convar.Key + " " + convar.Value.ToString());
@@ -2005,6 +2139,7 @@ public class Freefrag : BasePlugin
         // Float convars
         foreach (var convar in _serverStatus.FloatConvars)
         {
+            if (!ConvarRestore.ShouldRestore(convar.Key)) continue;
             // var tmpConvar = ConVar.Find(convar.Key);
             // Somehow the following 2 methods don't work, just make up a command to implement this.
             Server.ExecuteCommand(convar.Key + " " + convar.Value.ToString());
@@ -2016,6 +2151,7 @@ public class Freefrag : BasePlugin
         // String convars
         foreach (var convar in _serverStatus.StringConvars)
         {
+            if (!ConvarRestore.ShouldRestore(convar.Key)) continue;
             // var tmpConvar = ConVar.Find(convar.Key);
             // tmpConvar!.StringValue = convar.Value;
             Server.ExecuteCommand(convar.Key + " \"" + convar.Value + "\"");
@@ -2088,34 +2224,7 @@ public class Freefrag : BasePlugin
         }
 
         // Kick unmanaged bots
-        AddTimer(2f, () => {
-            if (!_modeGate.Active)
-            {
-                return;                 // A mode switch within 2 s of StartPractice: these are the new mode's bots.
-            }
-
-            var players = Utilities.GetPlayers();
-            List<CCSPlayerController> botsToKick = new List<CCSPlayerController>();
-            foreach(var player in players)
-            {
-                if (player == null || !player.IsValid || player.IsHLTV || !player.IsBot)
-                {
-                    continue;
-                }
-
-                if (_ownerOfBots.ContainsKey(player.Slot))
-                {
-                    continue;
-                }
-
-                botsToKick.Add(player);
-            }
-            foreach (var bot in botsToKick)
-            {
-                KickBot(bot.Slot);
-            }
-            botsToKick.Clear();
-        });
+        AddTimer(2f, KickStrayBots);
 
         // Server.ExecuteCommand("bot_autodifficulty_threshold_high 5");
         // Server.ExecuteCommand("bot_autodifficulty_threshold_low 5");
@@ -3465,16 +3574,62 @@ public class Freefrag : BasePlugin
         }
     }
 
+    // A bot is a stray when it is fully connected and no practicing player owns it. The connected-state
+    // guard keeps a bot that bot_add just created, and that OnClientPutInServerHandler has not claimed
+    // yet, out of the sweep.
+    private void KickStrayBots()
+    {
+        if (!BotOwnershipPolicy.SweepAllowed(_modeGate.Active))
+        {
+            return;
+        }
+
+        // prefire_settings.cfg (gamemode_competitive.cfg) and server.cfg (bots.cfg) put bot_quota back on map loads;
+        // hold it at 0 here so the engine does not refill the server with strays.
+        try
+        {
+            var quota = ConVar.Find("bot_quota")?.GetPrimitiveValue<int>();
+            if (quota.HasValue && BotOwnershipPolicy.QuotaNeedsReset(_modeGate.Active, quota.Value))
+            {
+                if (!_quotaHoldLogged)
+                {
+                    _quotaHoldLogged = true;
+                    Console.WriteLine($"[Freefrag] bot_quota was {quota.Value}; holding it at 0 while Prefire is active.");
+                }
+                Server.ExecuteCommand("bot_quota 0");
+                Server.ExecuteCommand("bot_quota_mode normal");
+            }
+        }
+        catch (Exception)
+        {
+            // The quota read is best effort; the sweep below still runs.
+        }
+
+        foreach (var player in Utilities.GetPlayers())
+        {
+            if (player == null || !player.IsValid || !player.IsBot || player.IsHLTV) continue;
+            if (_ownerOfBots.ContainsKey(player.Slot)) continue;
+            if (player.Connected != PlayerConnectedState.Connected) continue;
+
+            Console.WriteLine($"[Freefrag] Kicking stray bot {player.PlayerName} (slot {player.Slot}, userid {player.UserId}).");
+            KickBot(player.Slot);
+        }
+    }
+
     private void KickBot(int botSlot)
     {
+        _landingWatches.Remove(botSlot);
 
-        if (_ownerOfBots.ContainsKey(botSlot))
+        // The ownership records are dropped here, synchronously, even though the kick itself happens
+        // later in the engine: callers (FinishRoute, the remaining-targets count) need Bots accurate
+        // immediately. A kick that fails is caught by KickStrayBots, and a bot the engine removes on its
+        // own is caught by OnPlayerDisconnect.
+        if (_ownerOfBots.TryGetValue(botSlot, out var ownerSlot))
         {
-            int ownerSlot = _ownerOfBots[botSlot];
             RemoveGlow(ownerSlot, botSlot);
-            if (_playerStatuses[ownerSlot].Bots.Contains(botSlot))
+            if (_playerStatuses.TryGetValue(ownerSlot, out var ownerStatus))
             {
-                _playerStatuses[ownerSlot].Bots.Remove(botSlot);
+                ownerStatus.Bots.Remove(botSlot);
             }
             _ownerOfBots.Remove(botSlot);
         }
@@ -3486,8 +3641,17 @@ public class Freefrag : BasePlugin
             return;
         }
 
-        Server.ExecuteCommand($"bot_kick {bot.PlayerName}");
-        Console.WriteLine($"[Freefrag] Exec command: bot_kick {bot.PlayerName}");
+        // Kick by userid: bot names repeat, so bot_kick <name> can miss the bot that was meant.
+        if (bot.UserId.HasValue)
+        {
+            Server.ExecuteCommand($"kickid {bot.UserId.Value}");
+            Console.WriteLine($"[Freefrag] Exec command: kickid {bot.UserId.Value} ({bot.PlayerName})");
+        }
+        else
+        {
+            Server.ExecuteCommand($"bot_kick {bot.PlayerName}");
+            Console.WriteLine($"[Freefrag] Exec command: bot_kick {bot.PlayerName} (no userid)");
+        }
     }
 
     // Thanks to B3none
@@ -3586,7 +3750,42 @@ public class Freefrag : BasePlugin
             }
         }
 
-        if (_defaultPlayerSettings!.BotAimLock == 1)
+        // Landing pass: a bot teleported to its route coordinate may be in the air, so it is only
+        // frozen once it reports ground contact (or the watch times out).
+        if (_landingWatches.Count > 0)
+        {
+            foreach (var (watchSlot, watch) in _landingWatches.ToArray())
+            {
+                var watchedBot = Utilities.GetPlayerFromSlot(watchSlot);
+                if (watchedBot == null || !watchedBot.IsValid || !watchedBot.PawnIsAlive || watchedBot.PlayerPawn.Value == null)
+                {
+                    _landingWatches.Remove(watchSlot);
+                    continue;
+                }
+
+                var watchedPawn = watchedBot.PlayerPawn.Value;
+                bool grounded = (watchedPawn.Flags & FL_ONGROUND) != 0 || (watchedPawn.GroundEntity?.IsValid ?? false);
+
+                var verdict = watch.Tick(grounded, Server.TickCount);
+                if (verdict == LandingVerdict.Pending)
+                {
+                    continue;
+                }
+
+                _landingWatches.Remove(watchSlot);
+                if (verdict == LandingVerdict.TimedOut)
+                {
+                    Console.WriteLine($"[Freefrag] Bot {watchedBot.PlayerName} never reported ground contact within {LandingWatch.DefaultDeadlineTicks} ticks, freezing anyway.");
+                }
+                FreezeBot(watchedBot);
+            }
+        }
+
+        // Runs every tick because one atan2 per bot per tick is negligible, and a lower rate makes the
+        // bot's view step visibly when the player strafes. At level 2 the behaviour tree aims at the
+        // same point once it sees the player, so the two do not fight. Level 0 stays CS2-native and is
+        // the way to switch facing off.
+        if (_defaultPlayerSettings!.BotAimLock >= 1)
         {
             foreach (int playerSlot in _playerStatuses.Keys)
             {
@@ -3612,13 +3811,10 @@ public class Freefrag : BasePlugin
                     Vector botEyePosition = new Vector(bot.PlayerPawn.Value.AbsOrigin!.X, bot.PlayerPawn.Value.AbsOrigin!.Y, bot.PlayerPawn.Value.AbsOrigin!.Z + bot.PlayerPawn.Value.ViewmodelOffsetZ);
 
                     // calculate angle
-                    float deltaX = ownerEyePos.X - botEyePosition.X;
-                    float deltaY = ownerEyePos.Y - botEyePosition.Y;
-                    float deltaZ = ownerEyePos.Z - botEyePosition.Z;
-                    double yaw = 180 * Math.Atan2(deltaY, deltaX) / Math.PI;
-                    double tmp = Math.Sqrt(deltaX * deltaX + deltaY * deltaY);
-                    double pitch= 180 * Math.Atan2(-1 * deltaZ, tmp) / Math.PI;
-                    QAngle angle = new QAngle((float)pitch, (float)yaw, 0);
+                    var (pitch, yaw) = BotFacing.AnglesTo(
+                        botEyePosition.X, botEyePosition.Y, botEyePosition.Z,
+                        ownerEyePos.X, ownerEyePos.Y, ownerEyePos.Z);
+                    QAngle angle = new QAngle(pitch, yaw, 0);
 
                     Server.NextFrame(() => {
                         if (pitch < 15 && pitch > -15)
