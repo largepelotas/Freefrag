@@ -29,6 +29,8 @@ public class BotRequestQueue
     public int Count => _queue.Count;
     public bool IsEmpty => _queue.Count == 0;
     public int? ActiveOwner => _queue.Count > 0 ? _queue[0].OwnerSlot : null;
+    /// <summary>Bots still wanted across all queued requests (issued or not).</summary>
+    public int TotalPending => _queue.Sum(r => r.Pending);
     public int PendingFor(int ownerSlot) => _queue.Find(r => r.OwnerSlot == ownerSlot)?.Pending ?? 0;
 
     public void Clear() => _queue.Clear();

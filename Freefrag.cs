@@ -64,7 +64,7 @@ public class Freefrag : BasePlugin
     private CounterStrikeSharp.API.Modules.Timers.Timer ?_timerBroadcastProgress;
 
     private CounterStrikeSharp.API.Modules.Timers.Timer ?_strayBotSweep;
-    private bool _quotaHoldLogged;                                  // The bot_quota self-heal has been reported once already.
+    private int _botAddsInFlight;                                   // bot_add commands executed whose bot has not joined yet (see BotQuotaTarget).
     private const float StrayBotSweepInterval = 5f;                 // Seconds between sweeps for bots no practicing player owns.
 
     // bot_add timers per owner slot, so a bot request that is dropped or whose owner leaves cannot
@@ -260,7 +260,8 @@ public class Freefrag : BasePlugin
     /// </summary>
     private void EnterActive()
     {
-        Server.ExecuteCommand("bot_quota 0");
+        _botAddsInFlight = 0;
+        Server.ExecuteCommand($"bot_quota {BotQuotaTarget()}");   // 0 unless a hot reload finds bots owned or pending.
         Server.ExecuteCommand("bot_quota_mode normal");
         _strayBotSweep ??= AddTimer(StrayBotSweepInterval, KickStrayBots, TimerFlags.REPEAT);
         AddTimer(1f, KickStrayBots);   // Bots that were already on the server when Prefire became active.
@@ -390,6 +391,9 @@ public class Freefrag : BasePlugin
                 else
                     Server.ExecuteCommand($"bot_kick {bot.PlayerName}");
             }
+
+            // Every bot is gone, so the quota (owned + pending) is 0; left as it was, the engine would refill the server.
+            Server.ExecuteCommand("bot_quota 0");
         }
 
         _ownerOfBots.Clear();
@@ -462,6 +466,10 @@ public class Freefrag : BasePlugin
             // whenever no request claims it (Claim returns null on an empty queue). Dormant: other modes' bots are left alone.
             if (_modeGate.Active && !_ownerOfBots.ContainsKey(slot))
             {
+                if (_botAddsInFlight > 0)
+                {
+                    _botAddsInFlight--;
+                }
                 // Only the active request's bots are being spawned, so this bot belongs to its owner
                 // unless the bot's team says otherwise (then it came from somewhere else).
                 var ownerSlot = _botRequests.Claim(player.TeamNum, out var nextRequest);
@@ -521,6 +529,7 @@ public class Freefrag : BasePlugin
                     botOwnerStatus.Bots.Remove(player.Slot);
                 }
                 _ownerOfBots.Remove(player.Slot);
+                SyncBotQuota();   // The engine removed an owned bot: keep it from refilling the slot.
             }
             _landingWatches.Remove(player.Slot);
             return HookResult.Continue;
@@ -635,7 +644,7 @@ public class Freefrag : BasePlugin
                     {
                         if (!StillOwned()) return;
                         MovePlayer(playerOrBot, target.IsCrouching, position, target.Rotation);
-                        _landingWatches[playerOrBot.Slot] = new LandingWatch(Server.TickCount);
+                        _landingWatches[playerOrBot.Slot] = new LandingWatch(Server.TickCount) { TargetZ = position.Z };
                     });
                     AddTimer(0.6f, () => { if (StillOwned()) ApplyGlow(ownerSlot, playerOrBot); });
                     
@@ -1460,7 +1469,8 @@ public class Freefrag : BasePlugin
                 }
 
                 Server.ExecuteCommand($"bot_join_team {joinTeam}");
-                Server.ExecuteCommand(addCommand);
+                Server.ExecuteCommand(addCommand);   // The engine raises bot_quota by one; BotQuotaTarget counts it as pending.
+                _botAddsInFlight++;
             }));
         }
 
@@ -1476,6 +1486,8 @@ public class Freefrag : BasePlugin
             {
                 Console.WriteLine($"[Freefrag] Bot request of player slot {issue.OwnerSlot} timed out with {dropped} bots missing; dropping it.");
                 CancelBotAddTimers(issue.OwnerSlot);
+                _botAddsInFlight = 0;   // The missing bots are given up on, so they no longer count toward the quota.
+                SyncBotQuota();
             }
             if (next != null)
             {
@@ -1505,6 +1517,7 @@ public class Freefrag : BasePlugin
         {
             IssueBotRequest(next);
         }
+        SyncBotQuota();
     }
 
     private void MovePlayer(CCSPlayerController? player, bool crouch, Vector pos, QAngle ang)
@@ -2207,7 +2220,7 @@ public class Freefrag : BasePlugin
         Server.ExecuteCommand("custom_bot_difficulty 5");
         Server.ExecuteCommand("mp_death_drop_gun 0");
         Server.ExecuteCommand("mp_death_drop_grenade 0");
-        Server.ExecuteCommand("bot_quota 0");
+        Server.ExecuteCommand($"bot_quota {BotQuotaTarget()}");   // 0 unless bots are owned or pending.
 
         Server.ExecuteCommand("mp_respawn_immunitytime -1");
         Server.ExecuteCommand("mp_buytime 9999");
@@ -3589,18 +3602,16 @@ public class Freefrag : BasePlugin
         }
 
         // prefire_settings.cfg (gamemode_competitive.cfg) and server.cfg (bots.cfg) put bot_quota back on map loads;
-        // hold it at 0 here so the engine does not refill the server with strays.
+        // hold it at the number of bots Freefrag owns or has requested so the engine neither refills the server
+        // with strays nor removes bots Freefrag owns.
         try
         {
             var quota = ConVar.Find("bot_quota")?.GetPrimitiveValue<int>();
-            if (quota.HasValue && BotOwnershipPolicy.QuotaNeedsReset(_modeGate.Active, quota.Value))
+            var target = BotQuotaTarget();
+            if (quota.HasValue && BotOwnershipPolicy.QuotaNeedsSync(_modeGate.Active, quota.Value, target))
             {
-                if (!_quotaHoldLogged)
-                {
-                    _quotaHoldLogged = true;
-                    Console.WriteLine($"[Freefrag] bot_quota was {quota.Value}; holding it at 0 while Prefire is active.");
-                }
-                Server.ExecuteCommand("bot_quota 0");
+                Console.WriteLine($"[Freefrag] bot_quota was {quota.Value}; holding it at {target} while Prefire is active.");
+                Server.ExecuteCommand($"bot_quota {target}");
                 Server.ExecuteCommand("bot_quota_mode normal");
             }
         }
@@ -3642,6 +3653,7 @@ public class Freefrag : BasePlugin
 
         if (bot == null || !bot.IsValid || !bot.IsBot)
         {
+            SyncBotQuota();
             return;
         }
 
@@ -3656,6 +3668,32 @@ public class Freefrag : BasePlugin
             Server.ExecuteCommand($"bot_kick {bot.PlayerName}");
             Console.WriteLine($"[Freefrag] Exec command: bot_kick {bot.PlayerName} (no userid)");
         }
+
+        // kickid, unlike bot_kick, leaves bot_quota alone; with the quota above the bot count the engine would
+        // refill the slot at once. The record is already gone, so the target excludes this bot.
+        SyncBotQuota();
+    }
+
+    /// <summary>bot_quota Freefrag must hold while active: owned bots plus bot_adds that have not joined yet.</summary>
+    private int BotQuotaTarget()
+    {
+        var pending = Math.Min(_botAddsInFlight, _botRequests.TotalPending);
+        if (pending == 0)
+        {
+            _botAddsInFlight = 0;
+        }
+        return BotOwnershipPolicy.QuotaTarget(_ownerOfBots.Count, pending);
+    }
+
+    /// <summary>Sets bot_quota to <see cref="BotQuotaTarget"/>. Only while Prefire is active: dormant, the mode owns the quota.</summary>
+    private void SyncBotQuota()
+    {
+        if (!_modeGate.Active)
+        {
+            return;
+        }
+
+        Server.ExecuteCommand($"bot_quota {BotQuotaTarget()}");
     }
 
     // Thanks to B3none
@@ -3779,7 +3817,9 @@ public class Freefrag : BasePlugin
                 _landingWatches.Remove(watchSlot);
                 if (verdict == LandingVerdict.TimedOut)
                 {
-                    Console.WriteLine($"[Freefrag] Bot {watchedBot.PlayerName} never reported ground contact within {LandingWatch.DefaultDeadlineTicks} ticks, freezing anyway.");
+                    var originZ = watchedPawn.AbsOrigin?.Z;
+                    var zDelta = originZ.HasValue ? (originZ.Value - watch.TargetZ).ToString("F2") : "?";
+                    Console.WriteLine($"[Freefrag] Bot {watchedBot.PlayerName} never reported ground contact within {LandingWatch.DefaultDeadlineTicks} ticks, freezing anyway (pawn flags {watchedPawn.Flags}, move type {watchedPawn.MoveType}, groundEntity valid {watchedPawn.GroundEntity?.IsValid ?? false}, Z delta to target {zDelta}).");
                 }
                 FreezeBot(watchedBot);
             }

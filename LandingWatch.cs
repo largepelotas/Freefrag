@@ -19,6 +19,9 @@ public sealed class LandingWatch
     private readonly int _settleTicks;
     private LandingVerdict _verdict = LandingVerdict.Pending;
 
+    /// <summary>Z of the teleport target; only used to make the timeout log informative.</summary>
+    public float TargetZ { get; init; }
+
     public LandingWatch(int startTick, int deadlineTicks = DefaultDeadlineTicks, int settleTicks = DefaultSettleTicks)
     {
         if (deadlineTicks <= 0)

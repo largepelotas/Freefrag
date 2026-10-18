@@ -6,7 +6,7 @@ public class BotOwnershipPolicyTests
     [Fact]
     public void ActivatedStartsSweepAndHoldsQuota()
     {
-        Assert.Equal(OwnershipAction.StartSweep | OwnershipAction.HoldQuotaZero, BotOwnershipPolicy.ForTransition(ModeTransition.Activated));
+        Assert.Equal(OwnershipAction.StartSweep | OwnershipAction.HoldQuotaAtTarget, BotOwnershipPolicy.ForTransition(ModeTransition.Activated));
     }
 
     [Fact]
@@ -24,7 +24,7 @@ public class BotOwnershipPolicyTests
     [Fact]
     public void DeactivatedNeverHoldsTheQuota()
     {
-        Assert.False(BotOwnershipPolicy.ForTransition(ModeTransition.Deactivated).HasFlag(OwnershipAction.HoldQuotaZero));
+        Assert.False(BotOwnershipPolicy.ForTransition(ModeTransition.Deactivated).HasFlag(OwnershipAction.HoldQuotaAtTarget));
         Assert.False(BotOwnershipPolicy.ForTransition(ModeTransition.Deactivated).HasFlag(OwnershipAction.StartSweep));
     }
 
@@ -46,11 +46,32 @@ public class BotOwnershipPolicyTests
     public void KickAllOnUnloadOnlyWhileActive(bool active, bool expected) => Assert.Equal(expected, BotOwnershipPolicy.KickAllOnUnload(active));
 
     [Theory]
-    [InlineData(true, 0, false)]
-    [InlineData(true, 1, true)]
-    [InlineData(true, 10, true)]
-    [InlineData(false, 0, false)]
-    [InlineData(false, 10, false)]
-    public void QuotaNeedsResetOnlyWhenActiveAndNonZero(bool active, int quota, bool expected)
-        => Assert.Equal(expected, BotOwnershipPolicy.QuotaNeedsReset(active, quota));
+    [InlineData(0, 0, 0)]
+    [InlineData(5, 0, 5)]
+    [InlineData(0, 3, 3)]
+    [InlineData(4, 2, 6)]
+    [InlineData(-1, -2, 0)]
+    public void QuotaTargetIsOwnedPlusPending(int owned, int pending, int expected)
+        => Assert.Equal(expected, BotOwnershipPolicy.QuotaTarget(owned, pending));
+
+    [Theory]
+    [InlineData(1, 0)]
+    [InlineData(0, 1)]
+    [InlineData(5, 3)]
+    public void QuotaTargetIsNeverZeroWhileBotsAreOwnedOrPending(int owned, int pending)
+        => Assert.True(BotOwnershipPolicy.QuotaTarget(owned, pending) > 0);
+
+    [Fact]
+    public void KickingAnOwnedBotLowersTheTargetByOne()
+        => Assert.Equal(BotOwnershipPolicy.QuotaTarget(5, 2) - 1, BotOwnershipPolicy.QuotaTarget(4, 2));
+
+    [Theory]
+    [InlineData(true, 6, 0, true)]
+    [InlineData(true, 0, 6, true)]
+    [InlineData(true, 6, 6, false)]
+    [InlineData(true, 0, 0, false)]
+    [InlineData(false, 6, 0, false)]
+    [InlineData(false, 10, 3, false)]
+    public void QuotaNeedsSyncOnlyWhenActiveAndOffTarget(bool active, int quota, int target, bool expected)
+        => Assert.Equal(expected, BotOwnershipPolicy.QuotaNeedsSync(active, quota, target));
 }

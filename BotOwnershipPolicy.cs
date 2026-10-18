@@ -5,7 +5,7 @@ public enum OwnershipAction
 {
     None = 0,
     StartSweep = 1,
-    HoldQuotaZero = 2,
+    HoldQuotaAtTarget = 2,
     StopSweep = 4,
     ReleaseOwnedBots = 8,
 }
@@ -19,7 +19,7 @@ public static class BotOwnershipPolicy
     /// <summary>What the plugin must do when the mode gate flips.</summary>
     public static OwnershipAction ForTransition(ModeTransition transition) => transition switch
     {
-        ModeTransition.Activated => OwnershipAction.StartSweep | OwnershipAction.HoldQuotaZero,
+        ModeTransition.Activated => OwnershipAction.StartSweep | OwnershipAction.HoldQuotaAtTarget,
         ModeTransition.Deactivated => OwnershipAction.StopSweep | OwnershipAction.ReleaseOwnedBots,
         _ => OwnershipAction.None,
     };
@@ -30,6 +30,13 @@ public static class BotOwnershipPolicy
     /// <summary>Unloading kicks every bot only while active; a dormant unload leaves the mode's bots alone.</summary>
     public static bool KickAllOnUnload(bool active) => active;
 
-    /// <summary>The engine (a map-start cfg) put the quota back: only an active plugin forces it to 0 again.</summary>
-    public static bool QuotaNeedsReset(bool active, int currentQuota) => active && currentQuota != 0;
+    /// <summary>
+    /// The bot_quota Freefrag must hold while active: the bots it owns plus the bots it has bot_add'ed that have not
+    /// joined yet. In CS2 bot_add_* raises bot_quota by one and bot_kick lowers it by one, so the engine never adds or
+    /// removes bots on its own as long as the quota equals this number. Never 0 while bots are owned or pending.
+    /// </summary>
+    public static int QuotaTarget(int owned, int pending) => Math.Max(0, owned) + Math.Max(0, pending);
+
+    /// <summary>The engine (a map-start cfg, a kick) moved the quota off the target: only an active plugin sets it back.</summary>
+    public static bool QuotaNeedsSync(bool active, int currentQuota, int target) => active && currentQuota != target;
 }
