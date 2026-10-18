@@ -54,6 +54,25 @@ public sealed class ScreenMenu
         PushLevel(GetOrAdd(player), spec);
     }
 
+    /// <summary>
+    /// Swaps the top level's spec (e.g. rebuilt labels after a toggle) while keeping its cursor position.
+    /// Opens the spec as a fresh level if nothing is open.
+    /// </summary>
+    public void Replace(CCSPlayerController player, MenuSpec spec)
+    {
+        var menu = GetOrAdd(player);
+        if (menu.Levels.Count == 0)
+        {
+            PushLevel(menu, spec);
+            return;
+        }
+
+        var (_, cursor) = menu.Levels.Pop();
+        cursor.ClampTo(Math.Max(1, spec.Items.Count));
+        menu.Levels.Push((spec, cursor));
+        menu.Html = null;
+    }
+
     /// <summary>Up one level; at the main menu this closes.</summary>
     public void Back(CCSPlayerController player)
     {
