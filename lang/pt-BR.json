@@ -119,5 +119,21 @@
     "map.de_train.a_main_to_a_site": "Atacar o local A a partir do local A principal",
     "map.de_train.ivy_to_a": "Ataque um site de hera",
     "map.de_train.ladder_to_a": "Ataque um site da sala de escada",
-    "map.de_train.retake_b": "Retomar o site B do spawn CT"
+    "map.de_train.retake_b": "Retomar o site B do spawn CT",
+    "mainmenu.more": "More options.",
+    "moremenu.title": "More options",
+    "moremenu.hs": "Headshot only: {0}",
+    "moremenu.xray": "X-ray: {0}",
+    "moremenu.gun": "Your weapon: {0}",
+    "moremenu.jitter": "Bot spawn offset: {0}",
+    "moremenu.repeat": "Repeat route: {0}",
+    "moremenu.autoskip": "Auto-skip after deaths: {0}",
+    "moremenu.top": "Top times for this route",
+    "moremenu.stats": "My stats on this map",
+    "moremenu.binds": "Key binds for arrows/Enter/Backspace",
+    "gunmenu.title": "Choose your weapon",
+    "gunmenu.none": "No primary (pistol only)",
+    "jittermenu.title": "Bot spawn offset (units)",
+    "repeatmenu.title": "Repeat route",
+    "autoskipmenu.title": "Auto-skip after deaths"
 }

@@ -246,6 +246,9 @@ public class OpenPrefirePrac : BasePlugin
             // For players (idempotent: Load() also calls this for players already connected):
             if (_playerStatuses.ContainsKey(slot))
                 return;
+
+            // A slot reused after a disconnect we never saw must not inherit the previous player's open menu.
+            _screenMenu?.ForgetPlayer(slot);
             _playerStatuses.Add(slot, new PlayerStatus(_defaultPlayerSettings!));
 
             // Record player language
@@ -2044,10 +2047,7 @@ public class OpenPrefirePrac : BasePlugin
                         var gun = PlayerLoadout.ParseGun(commandInfo.ArgByIndex(2));
                         if (gun != null)
                         {
-                            _playerStatuses[player.Slot].PlayerGun = gun;
-                            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "gun.set", gun)}");
-                            if (_playerStatuses[player.Slot].PracticeIndex > -1)
-                                EquipPlayer(player);
+                            SetPlayerGun(player, gun);
                             return;
                         }
                         player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "gun.help")}");
@@ -2056,8 +2056,7 @@ public class OpenPrefirePrac : BasePlugin
                         var jitter = SpawnJitter.Parse(commandInfo.ArgByIndex(2));
                         if (jitter != null)
                         {
-                            _playerStatuses[player.Slot].Jitter = jitter.Value;
-                            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "jitter.set", jitter.Value)}");
+                            SetJitter(player, jitter.Value);
                             return;
                         }
                         player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "jitter.help")}");
@@ -2066,8 +2065,7 @@ public class OpenPrefirePrac : BasePlugin
                         var repeat = RepeatSetting.Parse(commandInfo.ArgByIndex(2));
                         if (repeat != null)
                         {
-                            _playerStatuses[player.Slot].Repeat = repeat.Value;
-                            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "repeat.set", RepeatSetting.DisplayName(repeat.Value))}");
+                            SetRepeat(player, repeat.Value);
                             return;
                         }
                         player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "repeat.help")}");
@@ -2076,9 +2074,7 @@ public class OpenPrefirePrac : BasePlugin
                         var autoSkip = AutoSkip.Parse(commandInfo.ArgByIndex(2));
                         if (autoSkip != null)
                         {
-                            _playerStatuses[player.Slot].AutoSkipDeaths = autoSkip.Value;
-                            _playerStatuses[player.Slot].DeathsOnRoute = 0;
-                            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {(autoSkip.Value == 0 ? _translator!.Translate(player, "autoskip.off") : _translator!.Translate(player, "autoskip.set", autoSkip.Value))}");
+                            SetAutoSkip(player, autoSkip.Value);
                             return;
                         }
                         player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "autoskip.help")}");
@@ -2087,12 +2083,7 @@ public class OpenPrefirePrac : BasePlugin
                         var hsSetting = ToggleSetting.Parse(commandInfo.ArgByIndex(2), _playerStatuses[player.Slot].HeadshotOnly);
                         if (hsSetting != null)
                         {
-                            if (_playerStatuses[player.Slot].HeadshotOnly != hsSetting.Value && _playerStatuses[player.Slot].PracticeIndex > -1)
-                            {
-                                _playerStatuses[player.Slot].Run.MarkDirty();
-                            }
-                            _playerStatuses[player.Slot].HeadshotOnly = hsSetting.Value;
-                            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "hs.set", ToggleSetting.DisplayName(hsSetting.Value))}");
+                            SetHeadshotOnly(player, hsSetting.Value);
                             return;
                         }
                         player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "hs.help")}");
@@ -2101,24 +2092,7 @@ public class OpenPrefirePrac : BasePlugin
                         var xraySetting = ToggleSetting.Parse(commandInfo.ArgByIndex(2), _playerStatuses[player.Slot].Xray);
                         if (xraySetting != null)
                         {
-                            _playerStatuses[player.Slot].Xray = xraySetting.Value;
-                            player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "xray.set", ToggleSetting.DisplayName(xraySetting.Value))}");
-                            if (_playerStatuses[player.Slot].PracticeIndex > -1)
-                            {
-                                if (xraySetting.Value)
-                                {
-                                    foreach (var botSlot in _playerStatuses[player.Slot].Bots.ToList())
-                                    {
-                                        var xrayBot = Utilities.GetPlayerFromSlot(botSlot);
-                                        if (xrayBot != null && xrayBot.IsValid && xrayBot.PawnIsAlive)
-                                            ApplyGlow(player.Slot, xrayBot);
-                                    }
-                                }
-                                else
-                                {
-                                    RemoveAllGlow(player.Slot);
-                                }
-                            }
+                            SetXray(player, xraySetting.Value);
                             return;
                         }
                         player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "xray.help")}");
@@ -2199,16 +2173,19 @@ public class OpenPrefirePrac : BasePlugin
         string currentBotWeapon = _playerStatuses[player.Slot].BotWeapon == 0 ? _translator!.Translate(player, "weaponmenu.random") : BotLoadout.DisplayName(_playerStatuses[player.Slot].BotWeapon);
         items.Add(MenuItem.Opens(_translator!.Translate(player, "mainmenu.bot_weapon", currentBotWeapon), () => BuildBotWeaponMenu(player)));
 
-        // 6 Language menu
+        // 6 More options menu
+        items.Add(MenuItem.Opens(_translator.Translate(player, "mainmenu.more"), () => BuildMoreOptionsMenu(player)));
+
+        // 7 Language menu
         items.Add(MenuItem.Opens("Language preference", () => BuildLanguageMenu(player)));
 
-        // 7 (Optional) End practicing button
+        // 8 (Optional) End practicing button
         if (_playerStatuses[player.Slot].PracticeIndex > 0)
         {
             items.Add(new MenuItem(_translator.Translate(player, "mainmenu.exit"), OnForceExitPrefireMode));
         }
 
-        // 8 Close menu button: added by the chat renderer; the screen menu closes with Tab.
+        // 9 Close menu button: added by the chat renderer; the screen menu closes with Tab.
 
         return new MenuSpec(_translator!.Translate(player, "mainmenu.title"), items, _translator.Translate(player, "mainmenu.shortcut_prompt"));
     }
@@ -2230,6 +2207,195 @@ public class OpenPrefirePrac : BasePlugin
         string weaponName = botWeapon == 0 ? _translator!.Translate(player, "weaponmenu.random") : BotLoadout.DisplayName(botWeapon);
 
         player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "weaponmenu.set", weaponName)}");
+    }
+
+    private void SetPlayerGun(CCSPlayerController player, string gun)
+    {
+        _playerStatuses[player.Slot].PlayerGun = gun;
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "gun.set", gun)}");
+        if (_playerStatuses[player.Slot].PracticeIndex > -1)
+            EquipPlayer(player);
+    }
+
+    private void SetJitter(CCSPlayerController player, int jitter)
+    {
+        _playerStatuses[player.Slot].Jitter = jitter;
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "jitter.set", jitter)}");
+    }
+
+    private void SetRepeat(CCSPlayerController player, int repeat)
+    {
+        _playerStatuses[player.Slot].Repeat = repeat;
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "repeat.set", RepeatSetting.DisplayName(repeat))}");
+    }
+
+    private void SetAutoSkip(CCSPlayerController player, int deaths)
+    {
+        _playerStatuses[player.Slot].AutoSkipDeaths = deaths;
+        _playerStatuses[player.Slot].DeathsOnRoute = 0;
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {(deaths == 0 ? _translator!.Translate(player, "autoskip.off") : _translator!.Translate(player, "autoskip.set", deaths))}");
+    }
+
+    private void SetHeadshotOnly(CCSPlayerController player, bool on)
+    {
+        if (_playerStatuses[player.Slot].HeadshotOnly != on && _playerStatuses[player.Slot].PracticeIndex > -1)
+        {
+            _playerStatuses[player.Slot].Run.MarkDirty();
+        }
+        _playerStatuses[player.Slot].HeadshotOnly = on;
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "hs.set", ToggleSetting.DisplayName(on))}");
+    }
+
+    private void SetXray(CCSPlayerController player, bool on)
+    {
+        _playerStatuses[player.Slot].Xray = on;
+        player.PrintToChat($" {ChatColors.Green}{ChatPrefix} {ChatColors.White} {_translator!.Translate(player, "xray.set", ToggleSetting.DisplayName(on))}");
+        if (_playerStatuses[player.Slot].PracticeIndex > -1)
+        {
+            if (on)
+            {
+                foreach (var botSlot in _playerStatuses[player.Slot].Bots.ToList())
+                {
+                    var xrayBot = Utilities.GetPlayerFromSlot(botSlot);
+                    if (xrayBot != null && xrayBot.IsValid && xrayBot.PawnIsAlive)
+                        ApplyGlow(player.Slot, xrayBot);
+                }
+            }
+            else
+            {
+                RemoveAllGlow(player.Slot);
+            }
+        }
+    }
+
+    private static readonly string[] GunChoices = { "ak", "m4", "m4a1s", "awp", "deagle", "usp", "glock", "none" };
+    private static readonly int[] JitterChoices = { 0, 16, 32, 48, 64 };
+    private static readonly int[] RepeatChoices = { RepeatSetting.Off, 1, 3, 5, RepeatSetting.Infinite };
+    private static readonly int[] AutoSkipChoices = { 0, 1, 2, 3, 5 };
+
+    private static string OffOrNumber(int value) => value == 0 ? "off" : value.ToString();
+
+    private string GunLabel(CCSPlayerController player, string gun) =>
+        gun == "none" ? _translator!.Translate(player, "gunmenu.none") : gun;
+
+    /// <summary>
+    /// An option on the More options menu was changed. Screen: rebuild main and put More options back on top
+    /// (Back still returns to main) so its labels show the new value. Chat: close, as for any setting.
+    /// </summary>
+    private void AfterMoreOptionChosen(CCSPlayerController player)
+    {
+        if (CloseScreenMenu(player))
+        {
+            OpenMenu(player, BuildMainMenu(player));
+            _screenMenu!.Push(player, BuildMoreOptionsMenu(player));
+        }
+        else
+        {
+            CloseCurrentMenu(player);
+        }
+    }
+
+    private MenuSpec BuildMoreOptionsMenu(CCSPlayerController player)
+    {
+        var status = _playerStatuses[player.Slot];
+        var items = new List<MenuItem>
+        {
+            new MenuItem(_translator!.Translate(player, "moremenu.hs", ToggleSetting.DisplayName(status.HeadshotOnly)), p =>
+            {
+                SetHeadshotOnly(p, !_playerStatuses[p.Slot].HeadshotOnly);
+                AfterMoreOptionChosen(p);
+            }),
+            new MenuItem(_translator.Translate(player, "moremenu.xray", ToggleSetting.DisplayName(status.Xray)), p =>
+            {
+                SetXray(p, !_playerStatuses[p.Slot].Xray);
+                AfterMoreOptionChosen(p);
+            }),
+            MenuItem.Opens(_translator.Translate(player, "moremenu.gun", GunLabel(player, status.PlayerGun)), () => BuildGunMenu(player)),
+            MenuItem.Opens(_translator.Translate(player, "moremenu.jitter", OffOrNumber(status.Jitter)), () => BuildJitterMenu(player)),
+            MenuItem.Opens(_translator.Translate(player, "moremenu.repeat", RepeatSetting.DisplayName(status.Repeat)), () => BuildRepeatMenu(player)),
+            MenuItem.Opens(_translator.Translate(player, "moremenu.autoskip", OffOrNumber(status.AutoSkipDeaths)), () => BuildAutoSkipMenu(player)),
+            new MenuItem(_translator.Translate(player, "moremenu.top"), p =>
+            {
+                CloseAllMenus(p);
+                HandleTopCommand(p, "");
+            }),
+            new MenuItem(_translator.Translate(player, "moremenu.stats"), p =>
+            {
+                CloseAllMenus(p);
+                HandleStatsCommand(p);
+            }),
+            new MenuItem(_translator.Translate(player, "moremenu.binds"), p =>
+            {
+                CloseAllMenus(p);
+                PrintBinds(p);
+            }),
+        };
+
+        return new MenuSpec(_translator.Translate(player, "moremenu.title"), items);
+    }
+
+    private MenuSpec BuildGunMenu(CCSPlayerController player)
+    {
+        var items = new List<MenuItem>();
+        foreach (var gun in GunChoices)
+        {
+            var choice = gun;
+            items.Add(new MenuItem(GunLabel(player, choice), p =>
+            {
+                SetPlayerGun(p, choice);
+                AfterMoreOptionChosen(p);
+            }));
+        }
+
+        return new MenuSpec(_translator!.Translate(player, "gunmenu.title"), items);
+    }
+
+    private MenuSpec BuildJitterMenu(CCSPlayerController player)
+    {
+        var items = new List<MenuItem>();
+        foreach (var jitter in JitterChoices)
+        {
+            var choice = jitter;
+            items.Add(new MenuItem(OffOrNumber(choice), p =>
+            {
+                SetJitter(p, choice);
+                AfterMoreOptionChosen(p);
+            }));
+        }
+
+        return new MenuSpec(_translator!.Translate(player, "jittermenu.title"), items);
+    }
+
+    private MenuSpec BuildRepeatMenu(CCSPlayerController player)
+    {
+        var items = new List<MenuItem>();
+        foreach (var repeat in RepeatChoices)
+        {
+            var choice = repeat;
+            items.Add(new MenuItem(RepeatSetting.DisplayName(choice), p =>
+            {
+                SetRepeat(p, choice);
+                AfterMoreOptionChosen(p);
+            }));
+        }
+
+        return new MenuSpec(_translator!.Translate(player, "repeatmenu.title"), items);
+    }
+
+    private MenuSpec BuildAutoSkipMenu(CCSPlayerController player)
+    {
+        var items = new List<MenuItem>();
+        foreach (var deaths in AutoSkipChoices)
+        {
+            var choice = deaths;
+            items.Add(new MenuItem(OffOrNumber(choice), p =>
+            {
+                SetAutoSkip(p, choice);
+                AfterMoreOptionChosen(p);
+            }));
+        }
+
+        return new MenuSpec(_translator!.Translate(player, "autoskipmenu.title"), items);
     }
 
     private MenuSpec BuildPracticeMenu(CCSPlayerController player)

@@ -101,10 +101,18 @@ public sealed class ScreenMenu
             return;
 
         var item = spec.Items[cursor.Index];
-        if (item.Submenu != null)
-            Push(player, item.Submenu());
-        else
-            item.OnChoose(player);
+        try
+        {
+            if (item.Submenu != null)
+                Push(player, item.Submenu());
+            else
+                item.OnChoose(player);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[OpenPrefirePrac] Menu action failed: {ex.GetType().Name}: {ex.Message}");
+            Close(player);
+        }
     }
 
     /// <summary>Per-tick: turns button presses into actions and keeps the centre text on screen.</summary>
