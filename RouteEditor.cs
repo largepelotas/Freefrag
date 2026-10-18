@@ -6,15 +6,26 @@ namespace Freefrag;
 /// <summary>Pure helpers behind !freefrag addbot / newroute: profile text in, profile text out.</summary>
 public static class RouteEditor
 {
-    public readonly record struct DraftBot(float X, float Y, float Z, float Pitch, float Yaw, bool Crouch);
+    /// <summary>A bot placed in game. A swinger hides here and runs to <see cref="Peek"/> when released; it has no peek until the player sets one.</summary>
+    public readonly record struct DraftBot(float X, float Y, float Z, float Pitch, float Yaw, bool Crouch, bool Swing = false, SwingSpec? Peek = null);
 
     private static readonly char[] Delimiters = { ' ', ',', '\t' };
     private static readonly Regex NamePattern = new("\\A[A-Za-z0-9_-]{1,40}\\z", RegexOptions.Compiled);
 
     private static string F(float v) => v.ToString("F6", CultureInfo.InvariantCulture);
 
-    public static string FormatBotLine(DraftBot b) =>
-        $"{F(b.X)} {F(b.Y)} {F(b.Z)} {F(b.Pitch)} {F(b.Yaw)} {F(0f)} {(b.Crouch ? "True" : "False")}";
+    public static string FormatBotLine(DraftBot b)
+    {
+        var line = $"{F(b.X)} {F(b.Y)} {F(b.Z)} {F(b.Pitch)} {F(b.Yaw)} {F(0f)} {(b.Crouch ? "True" : "False")}";
+        return b.Peek != null ? line + " " + SwingSpec.Format(b.Peek.Value) : line;
+    }
+
+    /// <summary>The bot with its peek point set to the given feet position and no trigger of its own.</summary>
+    public static DraftBot WithPeek(DraftBot bot, float x, float y, float z) =>
+        bot with { Peek = new SwingSpec(x, y, z, SwingSpec.NoTrigger) };
+
+    /// <summary>How many draft swingers still lack a peek point; saving is refused while this is above zero.</summary>
+    public static int MissingPeeks(IReadOnlyList<DraftBot> bots) => bots.Count(b => b.Swing && b.Peek == null);
 
     public static int ClampNumBots(int numBots, int totalTargets) => Math.Min(numBots, totalTargets);
 

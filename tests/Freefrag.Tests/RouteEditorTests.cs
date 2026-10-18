@@ -178,4 +178,79 @@ public class RouteEditorTests
             Directory.Delete(dir, true);
         }
     }
+
+    // Prevents: a swinger saved without its peek spec, so it reloads as a static bot and never swings.
+    [Fact]
+    public void FormatBotLineAppendsPeekSpec()
+    {
+        var swinger = new RouteEditor.DraftBot(1f, 2f, 3f, 0f, 90f, true, true, new SwingSpec(1f, 2f, 3f, SwingSpec.NoTrigger));
+        Assert.Equal("1.000000 2.000000 3.000000 0.000000 90.000000 0.000000 True peek 1.000000 2.000000 3.000000",
+            RouteEditor.FormatBotLine(swinger));
+    }
+
+    // Prevents: static bots gaining extra tokens, which would change every route the editor writes.
+    [Fact]
+    public void FormatBotLineOmitsPeekForStaticBots()
+    {
+        Assert.Equal("1.500000 -2.250000 3.000000 0.500000 90.000000 0.000000 True",
+            RouteEditor.FormatBotLine(new RouteEditor.DraftBot(1.5f, -2.25f, 3f, 0.5f, 90f, true)));
+    }
+
+    // Prevents: setting the peek point moving the hiding spot or losing the crouch flag of the draft bot.
+    [Fact]
+    public void WithPeekSetsThePointOnly()
+    {
+        var bot = new RouteEditor.DraftBot(1f, 2f, 3f, 4f, 5f, true, true);
+        var result = RouteEditor.WithPeek(bot, 10f, 20f, 30f);
+
+        Assert.Equal(new SwingSpec(10f, 20f, 30f, SwingSpec.NoTrigger), result.Peek);
+        Assert.Equal(bot with { Peek = result.Peek }, result);
+        Assert.True(result.Swing);
+        Assert.True(result.Crouch);
+        Assert.Equal(1f, result.X);
+        Assert.Equal(5f, result.Yaw);
+    }
+
+    // Prevents: addbot save writing a swinger whose peek point was never set.
+    [Fact]
+    public void MissingPeeksCountsSwingersWithoutPoint()
+    {
+        var bots = new[]
+        {
+            new RouteEditor.DraftBot(0, 0, 0, 0, 0, false),
+            new RouteEditor.DraftBot(0, 0, 0, 0, 0, false, true),
+            new RouteEditor.DraftBot(0, 0, 0, 0, 0, false, true, new SwingSpec(1, 2, 3, SwingSpec.NoTrigger)),
+        };
+        Assert.Equal(1, RouteEditor.MissingPeeks(bots));
+        Assert.Equal(0, RouteEditor.MissingPeeks(Array.Empty<RouteEditor.DraftBot>()));
+    }
+
+    // Prevents: the editor writing a swinger line the real parser reads back as a static bot.
+    [Fact]
+    public void InsertedSwingerLineParsesBack()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "freefrag-route-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "maps", "de_test"));
+        try
+        {
+            var lines = RouteEditor.InsertBots(RouteEditor.NewProfile(3, 10f, 20f, 30f, 1f, 2f), new[]
+            {
+                new RouteEditor.DraftBot(100f, 200f, 300f, 4f, 5f, false),
+                new RouteEditor.DraftBot(101f, 201f, 301f, 6f, 7f, true, true, new SwingSpec(500f, 600f, 700f, SwingSpec.NoTrigger)),
+            });
+            File.WriteAllLines(Path.Combine(dir, "maps", "de_test", "mine.txt"), lines);
+
+            var practice = new PrefirePractice(dir, "de_test", "mine");
+
+            Assert.Equal(2, practice.Targets.Count);
+            Assert.False(practice.Targets[0].IsSwinger);
+            Assert.True(practice.Targets[1].IsSwinger);
+            Assert.True(practice.Targets[1].IsCrouching);
+            Assert.Equal(new SwingSpec(500f, 600f, 700f, SwingSpec.NoTrigger), practice.Targets[1].Peek);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
 }

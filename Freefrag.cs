@@ -2005,6 +2005,7 @@ public class Freefrag : BasePlugin
     // ---------------------------------------------------------------------
     // Route editor: place bots and create routes in game.
     //   !freefrag addbot [crouch|stand]   add a draft bot where you stand, facing where you look
+    //   !freefrag addbot swing|peek       add a swinger at your feet, then set where it runs to (stand there, type peek)
     //   !freefrag addbot undo|clear|save  remove the last draft bot, discard all, or write them into the route
     //   !freefrag newroute <name> [bots]  create an empty route that starts where you stand
     // Pure profile editing lives in RouteEditor.cs.
@@ -2057,6 +2058,50 @@ public class Freefrag : BasePlugin
                 PrintEditorChat(player, "addbot.added", status.DraftBots.Count, crouch ? "crouching" : "standing");
                 return;
             }
+            case "swing":
+            {
+                var pawn = player.PlayerPawn.Value;
+                if (!player.IsValid || !player.PawnIsAlive || pawn == null || pawn.AbsOrigin == null)
+                {
+                    PrintEditorChat(player, "addbot.not_practicing");
+                    return;
+                }
+                var origin = pawn.AbsOrigin;
+                var angles = pawn.EyeAngles;
+                var crouch = (pawn.Flags & FL_DUCKING) != 0;
+                var bot = new RouteEditor.DraftBot(origin.X, origin.Y, origin.Z, angles.X, angles.Y, crouch, Swing: true);
+                status.DraftBots.Add(bot);
+                DrawDraftBotMarker(status, bot);
+                PrintEditorChat(player, "addbot.swing_added", status.DraftBots.Count);
+                return;
+            }
+            case "peek":
+            {
+                if (status.DraftBots.Count == 0 || !status.DraftBots[^1].Swing)
+                {
+                    PrintEditorChat(player, "addbot.peek_nothing");
+                    return;
+                }
+                var pawn = player.PlayerPawn.Value;
+                if (!player.IsValid || !player.PawnIsAlive || pawn == null || pawn.AbsOrigin == null)
+                {
+                    PrintEditorChat(player, "addbot.not_practicing");
+                    return;
+                }
+                var feet = pawn.AbsOrigin;
+                var last = status.DraftBots.Count - 1;
+                status.DraftBots[last] = RouteEditor.WithPeek(status.DraftBots[last], feet.X, feet.Y, feet.Z);
+                // Redraw the marker so the beam from the hiding spot to the peek point belongs to the same beam list.
+                if (status.DraftBotBeams.Count > 0)
+                {
+                    foreach (var index in status.DraftBotBeams[^1])
+                        RemoveBeam(index);
+                    status.DraftBotBeams.RemoveAt(status.DraftBotBeams.Count - 1);
+                }
+                DrawDraftBotMarker(status, status.DraftBots[last]);
+                PrintEditorChat(player, "addbot.peek_set", status.DraftBots.Count);
+                return;
+            }
             case "undo":
             {
                 if (status.DraftBots.Count == 0)
@@ -2080,8 +2125,16 @@ public class Freefrag : BasePlugin
                 PrintEditorChat(player, "addbot.cleared");
                 return;
             case "save":
+            {
+                var missing = RouteEditor.MissingPeeks(status.DraftBots);
+                if (missing > 0)
+                {
+                    PrintEditorChat(player, "addbot.peek_missing", missing);
+                    return;
+                }
                 SaveDraftBots(player);
                 return;
+            }
             default:
                 PrintEditorChat(player, "addbot.help");
                 return;
@@ -2104,8 +2157,13 @@ public class Freefrag : BasePlugin
         var yaw = bot.Yaw * MathF.PI / 180f;
         var nose = new Vector(bot.X + MathF.Cos(yaw) * DraftMarkerFacingLength, bot.Y + MathF.Sin(yaw) * DraftMarkerFacingLength, bot.Z + height);
 
+        var segments = new List<(Vector from, Vector to)> { (feet, head), (head, nose) };
+        // A swinger with a peek point also shows the route it will run, from its hiding spot to the peek point.
+        if (bot.Peek is { } peek)
+            segments.Add((new Vector(bot.X, bot.Y, bot.Z + 8f), new Vector(peek.X, peek.Y, peek.Z)));
+
         var beams = new List<int>();
-        foreach (var (from, to) in new[] { (feet, head), (head, nose) })
+        foreach (var (from, to) in segments)
         {
             var index = DrawBeam(from, to, System.Drawing.Color.Lime);
             if (index != -1)
@@ -2159,7 +2217,7 @@ public class Freefrag : BasePlugin
         }
 
         var added = status.DraftBots.Count;
-        practice.AppendTargets(status.DraftBots.Select(b => new TargetBot(b.X, b.Y, b.Z, b.Pitch, b.Yaw, 0f, b.Crouch)).ToList(), numBots);
+        practice.AppendTargets(status.DraftBots.Select(b => new TargetBot(b.X, b.Y, b.Z, b.Pitch, b.Yaw, 0f, b.Crouch, b.Peek)).ToList(), numBots);
         ClearDraftBots(slot);
 
         Console.WriteLine($"[Freefrag] Saved {added} bot(s) to {_mapName}/{practice.PracticeName} ({path})");
