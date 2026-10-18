@@ -154,9 +154,13 @@ done
 
 # The nightly merge copies custom_files over the install, so a leftover disabled/Freefrag there would resurrect
 # a second copy of the plugin next to the real one.
-# Only once the new folder exists in custom_files, so a partial earlier state cannot lose routes or config.
-if [ -d "$CUSTOM" ]; then
-  rm -rf ~/cs2/custom_files/addons/counterstrikesharp/plugins/disabled/Freefrag
+# Anything only the leftover still holds (routes, config, scores.db from a partial earlier state) is merged into
+# the new folder first, without overwriting what is already there.
+LEFTOVER=~/cs2/custom_files/addons/counterstrikesharp/plugins/disabled/Freefrag
+if [ -d "$LEFTOVER" ]; then
+  cp -rn "$LEFTOVER/." "$CUSTOM/"
+  rm -rf "$LEFTOVER"
+  echo "merged and removed leftover $LEFTOVER"
 fi
 echo "deployed $(stat -c %y "$OUT/Freefrag.dll" | cut -d. -f1) build to custom_files and live install"
 
