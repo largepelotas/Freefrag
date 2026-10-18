@@ -78,12 +78,9 @@ not code.
   walking (the same mechanism `SetPlayerFrozen(player, false)` uses: `MOVETYPE_WALK` plus
   `m_nActualMoveType = 2` plus `SetStateChanged`); mark `Released`. Released swingers are skipped by the
   per-tick aim lock loop so the tree's own look control is not fought.
-- Marker: the first class the spike proves the sensor can see. Candidates in order: `info_target`;
-  `prop_dynamic` with no model and `RenderMode` invisible (the glow code already spawns `prop_dynamic`).
-  The chosen class name is a constant `SwingMarkerClass` shared by the plugin and the tree file.
-- Arrival: once the released bot's feet are within 30 units of `Peek` (`SwingRelease.Arrived`), remove the
-  marker and clear `Marker`. The bot then holds under the tree's normal aim/attack behaviour. No return to
-  cover in v1.
+- Marker: superseded by the spike result (see "Runtime changes that follow from the spike"): no entity.
+- Arrival: once the released bot's feet are within 30 units of `Peek` (`SwingRelease.Arrived`) or 2 s have
+  passed, freeze it there and let the aim lock resume. No return to cover in v1.
 
 ### Behaviour tree
 
@@ -117,6 +114,30 @@ spots are farther apart than their peek points are from each other; document thi
   `never moved` log line as the diagnostic.
 
 ## Spike (before any of the above is built)
+
+**Result, 2026-10-18 22:50.** Three runs on the live server (commits e02f735, ec3d1b3 and a patched build):
+(1) `decorator_sensor` with `CLASSNAME` does not see a plugin-spawned `info_target` or `prop_dynamic`: the
+bot was released and stood still, no `[AI BT]` error. (2) With `entity_type_filter = "HUMAN_PLAYERS"` and
+`action_move_to destination` on that key, the released bot only sidestepped, because the per-tick aim lock
+teleports its angles every tick and cancels the move. (3) With the released bot excluded from the aim lock
+and the player behind cover, the bot ran around the corner to the player. So the sensor sees the human
+through walls and the tree moves an unfrozen bot. **Decision:** no marker entity. The branch runs the bot
+at the human; the peek point is the stop line (below). Spike 3's branch is the final one.
+
+### Runtime changes that follow from the spike
+
+- Release: unfreeze the bot and exclude it from the aim lock. No entity is spawned.
+- Arrival: the first tick the bot's feet are within 30 units of its peek point, `FreezeBot` runs and the
+  aim lock resumes for it, so it fights from the recorded spot. If 2 seconds pass without that (the nav
+  path never touched the peek point), freeze it where it is and log
+  `[Freefrag] Swinger <bot> on <route> target <n> never reached its peek point; frozen after 2 s.` once per
+  route target per map load. Either way the bot is a static bot from then on.
+- The tree branch: `decorator_sensor HUMAN_PLAYERS -> SwingTarget`, `decorator_picker_nearby`,
+  `condition_is_empty negated`, `action_move_to destination = "SwingTarget"` RUN / FASTEST,
+  `arrival_epsilon 20`, `auto_look_adjust 1`, placed after `Attack` in a selector. Static bots cannot move,
+  so the branch is inert for them.
+- Multiple owners: the bot runs at the nearest human, which is its owner in practice; the stop line
+  makes the difference moot.
 
 Two things only the live server can answer:
 

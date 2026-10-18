@@ -16,14 +16,14 @@
 - `Freefrag.cs` is stored with CRLF line endings (`git ls-files --eol Freefrag.cs` must read `i/crlf w/crlf` before every commit); every other source file is LF. Edit with tools that preserve the file's endings.
 - Every route file without a `peek` token must parse to exactly the same targets as before (the parser test in Task 1 pins this on a copy of `maps/de_dust2/a_long.txt`).
 - Chat strings go in `lang/en.json` only (pt-BR and zh fall back), through `PrintEditorChat(player, key, args)` in `Freefrag.cs:2018`.
-- Marker entity class name is one constant, `SwingMarkerClass`, used by the plugin and asserted against the tree file; its value is decided by the spike (Task 0).
+- Spike result (Task 0, done 2026-10-18): no marker entity; the tree runs a released bot at the sensed human, and the peek point is where the plugin re-freezes it (within 30 units, or after 2 s wherever it is). `SwingMarkerClass` does not exist.
 - No commit may include the spike command (Task 0's `swingtest`) once Task 5 lands; Task 5 removes it.
 
 ## Review Focus
 
 - A `peek` spec with only two numbers (`peek 1 2 True`): the line must become a static bot with one console warning, never a crash or a half-parsed swinger (Task 1 test `MalformedPeekFallsBackToStaticWithWarning`).
-- Owner dies or exits the route after releasing a swinger: the marker must be removed and the bot kicked like any other, no marker left for the next route (Task 4 test `ClearRemovesMarkersAndStates` plus the in-game check in Task 6).
-- Two swingers whose hiding spots are closer to each other's peek points than their own: both run to the same marker; the README states the rule and the editor does not try to prevent it (Task 3 README line).
+- Owner dies or exits the route after releasing a swinger: the swing state is dropped with the bot and the aim lock exclusion ends, no state left for the next route (Task 4 test `ClearDropsStates` plus the in-game check in Task 6).
+- A swinger whose nav path to the player never passes its peek point: it must still be frozen after 2 s, logged once, and count as a normal target afterwards (Task 4 test `ArrivedAfterTimeCap`).
 - A swinger spawned while the owner is already inside the trigger distance: it must still land and freeze first, then release on the next tick after the landing watch finishes, not run from mid-air (Task 4 test `ReleaseWaitsForLanding`).
 - `trigger` below 100 or above 3000 on a route line: clamp and keep going rather than reject the route (Task 1 test `TriggerIsClamped`); a config `SwingTrigger` out of range keeps the default (Task 3 test `SwingTriggerOutOfRangeKeepsDefault`).
 
@@ -182,13 +182,13 @@ Keep the kv3 header line and the tab indentation of the file.
 
 - [ ] **Step 3: Implement** the property in both config classes and the range check; add `SwingTrigger = {SwingTrigger}` to the console line; add `"SwingTrigger": 600,` to `default_cfg.json.example` with a README bullet under the config list: `SwingTrigger: 100-3000: Distance (units) at which a swinging bot is released when its route line sets no trigger (default 600).`
 
-- [ ] **Step 4: README section** "Swinging bots (this fork)": the `peek px py pz [trigger d]` format with one example line; the editor commands from Task 2; "a released bot runs to the nearest marker, so keep hiding spots farther apart than their peek points"; "bots only move on the nav mesh; a bot that never moves is reported in the server console as `Route <name> target <n> ... never moved`"; v1 limits (no return to cover, no swing direction).
+- [ ] **Step 4: README section** "Swinging bots (this fork)": the `peek px py pz [trigger d]` format with one example line; the editor commands from Task 2; "a released bot runs toward you and is frozen at its peek point, so put the peek point on the path it takes out of cover (the corner's exit), reachable within 2 seconds"; "bots only move on the nav mesh; a bot that never moves is reported in the server console as `Route <name> target <n> ... never moved`"; v1 limits (no return to cover, no swing direction).
 
 - [ ] **Step 5: Run tests**; `Passed!`. **Commit** `Config: SwingTrigger; README: swinging bots`.
 
 ---
 
-### Task 4: Release loop, markers and cleanup
+### Task 4: Release loop, stop line and cleanup
 
 **Files:**
 - Create: `SwingRelease.cs`
@@ -197,8 +197,8 @@ Keep the kv3 header line and the tab indentation of the file.
 - Test: `tests/Freefrag.Tests/SwingReleaseTests.cs`
 
 **Interfaces:**
-- Consumes: `TargetBot.Peek`, `SwingSpec` (Task 1); `DefaultConfig.SwingTrigger` (Task 3); `SwingMarkerClass` value (Task 0).
-- Produces: `public sealed class SwingState { public SwingSpec Peek; public float Trigger; public bool Released; public int Marker = -1; public bool Landed; }`; static `SwingRelease` with `public const float ArriveDistance = 30f;` `public static float EffectiveTrigger(float lineTrigger, int configDefault)` (line value when not `NoTrigger`, else the config, both through `SwingTriggerSetting.Clamp`); `public static bool ShouldRelease(SwingState s, float ownerX, float ownerY, float ownerZ, float hideX, float hideY, float hideZ)` (false unless `Landed && !Released` and 3D distance ≤ `Trigger`); `public static bool Arrived(SwingState s, float botX, float botY, float botZ)` (`Released && Marker != -1` and distance to `Peek` ≤ `ArriveDistance`). Plugin-side: `private const string SwingMarkerClass = "<from spike>";`, `ReleaseSwinger(int ownerSlot, int botSlot)`, `RemoveSwingMarker(SwingState s)`, `ClearSwingers(int ownerSlot)`.
+- Consumes: `TargetBot.Peek`, `SwingSpec` (Task 1); `DefaultConfig.SwingTrigger` (Task 3).
+- Produces: `public sealed class SwingState { public SwingSpec Peek; public float Trigger; public float HideX, HideY, HideZ; public string RouteName = ""; public int TargetIndex; public bool Landed; public bool Released; public int ReleasedTick; public bool Frozen; }`; static `SwingRelease` with `public const float ArriveDistance = 30f; public const int MaxRunTicks = 128;` (2 s at 64 tick) `public static float EffectiveTrigger(float lineTrigger, int configDefault)` (line value when not `NoTrigger`, else the config, both through `SwingTriggerSetting.Clamp`); `public static bool ShouldRelease(SwingState s, float ownerX, float ownerY, float ownerZ)` (false unless `Landed && !Released` and 3D distance from the owner to `Hide*` is at most `Trigger`); `public static bool Arrived(SwingState s, float botX, float botY, float botZ, int tick)` (`Released && !Frozen` and either distance to `Peek` at most `ArriveDistance` or `tick - ReleasedTick >= MaxRunTicks`); `public static bool TimedOut(SwingState s, int tick)` for the log line. Plugin-side: `ReleaseSwinger(int ownerSlot, int botSlot)`, `FreezeSwinger(int ownerSlot, int botSlot, int tick)`, `ClearSwingers(int ownerSlot)`; the aim-lock loop skips bots whose state is `Released && !Frozen`.
 
 - [ ] **Step 1: Write the failing tests** in `SwingReleaseTests.cs`:
 
@@ -207,42 +207,40 @@ Keep the kv3 header line and the tab indentation of the file.
 [Fact] public void ReleaseWaitsForLanding()                    // Landed=false inside trigger -> false; Landed=true -> true
 [Fact] public void ReleaseUsesThreeDimensionalDistance()        // owner 600 above the spot with trigger 500 -> false
 [Fact] public void ReleasedOnceStaysReleased()                 // Released=true -> ShouldRelease false
-[Fact] public void ArrivedOnlyWithAMarkerWithinThirtyUnits()   // Marker=-1 -> false; 29 units -> true; 31 -> false
-[Fact] public void ClearRemovesMarkersAndStates()              // pure part: a helper that collects marker indices to remove from a status and empties the dictionary
+[Fact] public void ArrivedWithinThirtyUnitsOfThePeekPoint()    // not released -> false; released, 29 units -> true; 31 units -> false; Frozen -> false
+[Fact] public void ArrivedAfterTimeCap()                       // released at tick 1000, 40 units away: tick 1127 -> false, tick 1128 -> true; TimedOut true only in that case
+[Fact] public void ClearDropsStates()                          // TakeStates empties the dictionary and returns the slots that were Released && !Frozen (they need the aim lock back)
 ```
 
 - [ ] **Step 2: Run to verify they fail.**
 
-- [ ] **Step 3: Implement `SwingRelease.cs`** and the `SwingState` class (same file), plus `public static List<int> TakeMarkers(Dictionary<int, SwingState> swingers)` which returns every `Marker != -1` and clears the dictionary (the pure half of `ClearSwingers`).
+- [ ] **Step 3: Implement `SwingRelease.cs`** and the `SwingState` class (same file), plus `public static List<int> TakeStates(Dictionary<int, SwingState> swingers)` which returns the slots that were `Released && !Frozen` and clears the dictionary (the pure half of `ClearSwingers`).
 
 - [ ] **Step 4: Wire the plugin.**
-  - OnPlayerSpawn: when `target.IsSwinger`, after creating the landing watch add `status.Swingers[botSlot] = new SwingState { Peek = target.Peek.Value, Trigger = SwingRelease.EffectiveTrigger(target.Peek.Value.Trigger, _defaultPlayerSettings!.SwingTrigger) }`.
+  - OnPlayerSpawn: when `target.IsSwinger`, after creating the landing watch add `status.Swingers[botSlot] = new SwingState { Peek = target.Peek.Value, Trigger = SwingRelease.EffectiveTrigger(target.Peek.Value.Trigger, _defaultPlayerSettings!.SwingTrigger), HideX/Y/Z = position, RouteName, TargetIndex }`.
   - Landing pass: when a watch ends (any verdict) and the bot has a `SwingState`, set `Landed = true` (FreezeBot still runs).
-  - New block after the landing pass: for each practicing owner with a live pawn, for each `(botSlot, state)` in `Swingers`: if `ShouldRelease(...)` with the hiding spot = `_practices[idx].Targets[...]` position stored on the state at creation (`add public float HideX, HideY, HideZ`), call `ReleaseSwinger`; else if `Arrived(state, botFeet)` call `RemoveSwingMarker(state)`.
-  - `ReleaseSwinger`: spawn `Utilities.CreateEntityByName<CBaseEntity>(SwingMarkerClass)`, `Teleport(peek, QAngle.Zero, Vector.Zero)`, `DispatchSpawn()`, store `Marker = entity.Index`; unfreeze the bot exactly as `SetPlayerFrozen(bot, false)` does; `Released = true`; console line `[Freefrag] Released swinger {name} for slot {owner} towards ({peek}).`
-  - Aim-lock loop: `continue` for bots whose `SwingState.Released` is true.
-  - `RemoveSwingMarker`: `Utilities.GetEntityFromIndex<CBaseEntity>(Marker)?.Remove()` when valid, `Marker = -1`.
-  - `ClearSwingers(ownerSlot)`: remove every marker from `TakeMarkers`, called from `UnsetPrefireMode`, `Unload` (per owner), and on bot death/kick for that bot only (`KickBot`: remove the one state after removing its marker; look up the owner through `_ownerOfBots`). Map start: clear the dictionaries without touching entity indices, like `DraftBotBeams`.
+  - New block after the landing pass: for each practicing owner with a live pawn, for each `(botSlot, state)` in `Swingers` with a live bot pawn: if `ShouldRelease(state, ownerFeet)` call `ReleaseSwinger`; else if `Arrived(state, botFeet, Server.TickCount)` call `FreezeSwinger`.
+  - `ReleaseSwinger`: unfreeze the bot exactly as `SetPlayerFrozen(bot, false)` does (`MOVETYPE_WALK`, `m_nActualMoveType = 2`, `SetStateChanged`); `Released = true`, `ReleasedTick = Server.TickCount`; console line `[Freefrag] Released swinger {name} for slot {owner} towards its peek point.`
+  - `FreezeSwinger`: `FreezeBot(bot)`; `Frozen = true`; if `TimedOut(state, tick)` and `_swingTimeoutLogged.Add((RouteName, TargetIndex))` (a `HashSet<(string,int)>` cleared on map start like `_landingNeverMovedLogged`), log `[Freefrag] Swinger {name} on {route} target {n+1} never reached its peek point; frozen after 2 s.`
+  - Aim-lock loop: `continue` for bots whose state is `Released && !Frozen` (the spike proved a per-tick angle Teleport cancels the tree's move; implement it against `Swingers`, not the spike's `_swingTestReleased` set).
+  - `ClearSwingers(ownerSlot)`: `TakeStates`, called from `UnsetPrefireMode` and `Unload` (per owner); on bot death/kick drop that bot's state only (`KickBot`: look up the owner through `_ownerOfBots`). Map start: clear the dictionaries like `DraftBotBeams`.
 
-- [ ] **Step 5: Run tests**; `Passed!`. **Commit** `Swinging bots: release loop, markers and cleanup`.
+- [ ] **Step 5: Run tests**; `Passed!`. **Commit** `Swinging bots: release loop, stop line and cleanup`.
 
 ---
 
 ### Task 5: Final tree branch and shape test; remove the spike command
 
 **Files:**
-- Modify: `resources/bt/hard_mode.kv3` (set `class_name` to the spike's result; keep the Task 0 structure)
-- Modify: `Freefrag.cs` (delete `case "swingtest":` and `HandleSwingTestCommand`)
+- Modify: `resources/bt/hard_mode.kv3` (rename the key `SwingMarkers` to `SwingTarget` in the sensor output, picker input, condition input and `destination`; update the comment line; structure otherwise as spike 2 left it)
+- Modify: `Freefrag.cs` (delete `case "swingtest":`, `HandleSwingTestCommand` and the `_swingTestReleased` set if present)
 - Test: `tests/Freefrag.Tests/BehaviorTreeConfigTests.cs`
 
-**Interfaces:**
-- Consumes: `SwingMarkerClass` (Task 4) — the test reads the constant through reflection or a `public const` on a small `SwingMarker` static class moved out of `Freefrag.cs` (`SwingMarker.ClassName`); prefer the static class so the test needs no engine types.
+- [ ] **Step 1: Write the failing test** `HardModeTreeRunsAtTheHumanWhenNotAttacking`: read `resources/bt/hard_mode.kv3` through the existing `RepoFile` helper; assert exactly one `action_move_to`, its `destination = "SwingTarget"`, exactly two `entity_type_filter = "HUMAN_PLAYERS"` sensors, no `CLASSNAME` sensor, and that `bt_attack.kv3` appears before `SwingTarget` in the file (attack wins the selector).
 
-- [ ] **Step 1: Write the failing test** `HardModeTreeRunsToTheSwingMarker`: read `resources/bt/hard_mode.kv3` through the existing `RepoFile` helper; assert exactly one `action_move_to`, its `destination = "SwingMarkers"`, one `class_name = "<SwingMarker.ClassName>"`, and that `bt_attack.kv3` appears before the sensor in the file (attack wins the selector).
+- [ ] **Step 2: Run to verify it fails** (the key is still `SwingMarkers`).
 
-- [ ] **Step 2: Run to verify it fails** (if the spike already set the right class, the test passes immediately: then make it fail once by editing the expected value, confirm, and restore it).
-
-- [ ] **Step 3: Implement**: move the constant to `SwingMarker.cs`, delete the spike command, align the tree.
+- [ ] **Step 3: Implement**: rename the key, delete the spike command.
 
 - [ ] **Step 4: Run tests**; `Passed!`. **Commit** `Swinging bots: final tree branch, spike command removed`.
 
@@ -253,6 +251,6 @@ Keep the kv3 header line and the tab indentation of the file.
 **Files:** none in code; one route file under `maps/<map>/` gains two `peek` lines through the editor.
 
 - [ ] **Step 1: Build and publish** (`all`), commit nothing yet, hand Quinn `bash -c "FORCE_RELOAD=1 scripts/deploy.sh"`.
-- [ ] **Step 2: Quinn** starts an existing route, uses `!freefrag addbot swing` behind a corner and `!freefrag addbot peek` at the exposed spot twice, `addbot save`, restarts the route, and reports: both bots stay hidden until approached, run to their points, shoot; kills count; leaving the route leaves no marker (check with `!freefrag prac` again and the console).
-- [ ] **Step 3: Read the server log** for `Released swinger` lines and any `[AI BT]` error; `scripts/pull-routes.sh`; commit the route file as `Routes: two swingers on <map>/<route>`.
+- [ ] **Step 2: Quinn** starts an existing route, uses `!freefrag addbot swing` behind a corner and `!freefrag addbot peek` at the corner's exit twice, `addbot save`, restarts the route, and reports: both bots stay hidden until approached, run out, stop at their peek points and shoot from there; kills count; leaving the route and restarting works twice in a row.
+- [ ] **Step 3: Read the server log** for `Released swinger` lines, `never reached its peek point` lines and any `[AI BT]` error; `scripts/pull-routes.sh`; commit the route file as `Routes: two swingers on <map>/<route>`.
 - [ ] **Step 4: Update** `docs/swinging-bots-design.md` status line and the roadmap memory.
