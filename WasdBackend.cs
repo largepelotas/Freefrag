@@ -1,13 +1,13 @@
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Capabilities;
-using WASDSharedAPI;
-using WASDSharedAPI.Models;
+using WASDMenuAPI.Shared;
+using WASDMenuAPI.Shared.Models;
 
 namespace OpenPrefirePrac;
 
 /// <summary>
 /// Renders MenuSpecs through the WASDMenuAPI plugin. This is the only class that touches
-/// WASDSharedAPI types, and none of them appear in its public surface: when WASDMenuAPI is not
+/// WASDMenuAPI.Shared types, and none of them appear in its public surface: when WASDMenuAPI is not
 /// installed the shared assembly cannot be loaded, the failure surfaces as an exception when
 /// TryCreate is called (JIT time), and the caller catches it and falls back to chat menus.
 /// </summary>

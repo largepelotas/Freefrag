@@ -20,8 +20,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="WASDSharedAPI">
-      <HintPath>lib/WASDSharedAPI.dll</HintPath>
+    <Reference Include="WASDMenuAPI.Shared">
+      <HintPath>lib/WASDMenuAPI.Shared.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
