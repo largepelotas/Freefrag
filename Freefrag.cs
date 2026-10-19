@@ -1628,9 +1628,12 @@ public class Freefrag : BasePlugin
             // Kill any residual velocity first; VPHYSICS would otherwise keep it.
             bot.PlayerPawn.Value.Teleport(null, null, Vector.Zero);
 
-            // bot.PlayerPawn.Value.MoveType = MoveType_t.MOVETYPE_OBSOLETE;
-            bot.PlayerPawn.Value.MoveType = MoveType_t.MOVETYPE_VPHYSICS;
+            // Only the engine's internal move type (m_nActualMoveType) is switched to VPHYSICS, which is what
+            // stops the simulation. The networked m_MoveType stays WALK so the client keeps the standing
+            // animation: with VPHYSICS networked too, every frozen bot rendered in the airborne pose (bent
+            // knees) even after FL_ONGROUND was stamped (2026-10-19). SetPlayerFrozen still sets both.
             Schema.SetSchemaValue(bot.PlayerPawn.Value.Handle, "CBaseEntity", "m_nActualMoveType", 5);
+            bot.PlayerPawn.Value.MoveType = MoveType_t.MOVETYPE_WALK;
             Utilities.SetStateChanged(bot.PlayerPawn.Value, "CBaseEntity", "m_MoveType");
             MarkGrounded(bot.PlayerPawn.Value);
         }
