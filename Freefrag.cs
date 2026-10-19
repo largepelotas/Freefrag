@@ -50,6 +50,7 @@ public class Freefrag : BasePlugin
     private readonly BotRequestQueue _botRequests = new();        // One player's bots spawn at a time; see BotRequestQueue.
     private readonly Dictionary<int, LandingWatch> _landingWatches = new();
     private readonly HashSet<int> _landingTimeoutLogged = new();              // Owner slots whose current route start already logged a landing timeout.
+    private readonly HashSet<string> _lateWeaponLogged = new();               // Bot names already reported for a late weapon with bots-fire off; cleared on map start.
     private readonly Dictionary<int, (float Pitch, float Yaw)> _aimLockApplied = new();   // Key: bot slot. Angles last teleported by the aim lock; see AimLockTurnDegrees.
     // The aim lock used to teleport every bot's angles every tick. A teleport each tick leaves the pawn's
     // networked pose out of step with its server hitboxes (2026-10-19: four AK hits on one standing bot
@@ -580,6 +581,7 @@ public class Freefrag : BasePlugin
             status.CompletedRoutes.Clear();     // route names are per map
         }
         _landingNeverMovedLogged.Clear();       // report each bad route line once per map load
+        _lateWeaponLogged.Clear();
         _swingTimeoutLogged.Clear();
         _glowCount = 0;
 
@@ -710,6 +712,15 @@ public class Freefrag : BasePlugin
                     var botHealth = _playerStatuses[ownerSlot].BotHealth;
                     var botArmor = _playerStatuses[ownerSlot].BotArmor;
                     AddTimer(0.45f, () => { if (StillOwned()) ApplyBotVitals(playerOrBot, botHealth, botArmor); });
+
+                    // With bots-fire off the engine still hands the bot its free default pistol after the spawn
+                    // event (2026-10-19: a stripped bot shot the player with an hkp2000), so strip again once the
+                    // spawn loadout has settled, and once more after the teleport in case a respawn re-arms it.
+                    if (!botsFire)
+                    {
+                        AddTimer(0.5f, () => { if (StillOwned()) StripLateWeapons(playerOrBot); });
+                        AddTimer(1.5f, () => { if (StillOwned()) StripLateWeapons(playerOrBot); });
+                    }
 
                     // Try to increase bot difficulty
                     // playerOrBot.beha
@@ -2690,6 +2701,30 @@ public class Freefrag : BasePlugin
         // Server.ExecuteCommand("mp_respawn_on_death_t 1");
 
         Console.WriteLine("[Freefrag] Values of convars set.");
+    }
+
+    /// <summary>
+    /// Removes any gun a bots-fire-off bot picked up after the spawn-time strip (the engine's default pistol
+    /// arrives late) and logs what it found, once per bot name per map load, so the log shows the source.
+    /// </summary>
+    private void StripLateWeapons(CCSPlayerController bot)
+    {
+        if (bot == null || !bot.IsValid || !bot.PawnIsAlive || bot.PlayerPawn.Value?.WeaponServices == null)
+            return;
+
+        var held = new List<string>();
+        foreach (var weapon in bot.PlayerPawn.Value.WeaponServices.MyWeapons)
+        {
+            if (weapon != null && weapon.IsValid && weapon.Value != null && weapon.Value.DesignerName.Length != 0)
+                held.Add(weapon.Value.DesignerName);
+        }
+        if (held.Count == 0)
+            return;
+
+        SetMoney(bot, 0);
+        bot.RemoveWeapons();
+        if (_lateWeaponLogged.Add(bot.PlayerName))
+            Console.WriteLine($"[Freefrag] Bot {bot.PlayerName} held {string.Join(", ", held)} after the bots-fire-off strip; stripped again.");
     }
 
     private void RefillAmmo(CCSPlayerController player)
