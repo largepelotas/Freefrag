@@ -20,4 +20,20 @@ public static class BotFacing
         double pitch = 180.0 * Math.Atan2(-dz, horizontal) / Math.PI;
         return ((float)pitch, (float)yaw);
     }
+
+    /// <summary>
+    /// True when the facing (pitch, yaw) differs from the last applied one by more than
+    /// <paramref name="thresholdDegrees"/> on either axis. Yaw differences wrap, so 179 and -179
+    /// are 2 degrees apart. The per-tick aim lock only teleports a bot's angles when this is true,
+    /// because a teleport every tick desynchronises the pawn's pose from its hitboxes.
+    /// </summary>
+    public static bool NeedsTurn(float lastPitch, float lastYaw, float pitch, float yaw, float thresholdDegrees)
+    {
+        if (float.IsNaN(lastPitch) || float.IsNaN(lastYaw))
+            return true;
+        float dPitch = MathF.Abs(pitch - lastPitch);
+        float dYaw = MathF.Abs(yaw - lastYaw) % 360f;
+        if (dYaw > 180f) dYaw = 360f - dYaw;
+        return dPitch > thresholdDegrees || dYaw > thresholdDegrees;
+    }
 }

@@ -50,6 +50,12 @@ public class Freefrag : BasePlugin
     private readonly BotRequestQueue _botRequests = new();        // One player's bots spawn at a time; see BotRequestQueue.
     private readonly Dictionary<int, LandingWatch> _landingWatches = new();
     private readonly HashSet<int> _landingTimeoutLogged = new();              // Owner slots whose current route start already logged a landing timeout.
+    private readonly Dictionary<int, (float Pitch, float Yaw)> _aimLockApplied = new();   // Key: bot slot. Angles last teleported by the aim lock; see AimLockTurnDegrees.
+    // The aim lock used to teleport every bot's angles every tick. A teleport each tick leaves the pawn's
+    // networked pose out of step with its server hitboxes (2026-10-19: four AK hits on one standing bot
+    // registered chest/neck/neck/neck while the crosshair sat on its head), so angles are now only
+    // teleported once the facing has drifted by more than this many degrees; the eye angles still track.
+    private const float AimLockTurnDegrees = 4f;
     private readonly HashSet<(string Route, int Target)> _landingNeverMovedLogged = new();   // Route targets already reported as never simulated; cleared on map start.              // Owner slots whose current route start already logged a landing timeout.
     private readonly HashSet<(string Route, int Target)> _swingTimeoutLogged = new();      // Swinger route targets already reported as never reaching their peek point; cleared on map start.
     private const uint FL_ONGROUND = 1u << 0;
@@ -659,6 +665,7 @@ public class Freefrag : BasePlugin
                     {
                         if (!StillOwned()) return;
                         MovePlayer(playerOrBot, target.IsCrouching, position, target.Rotation);
+                        _aimLockApplied.Remove(playerOrBot.Slot);     // fresh placement: the first aim-lock tick teleports the facing
                         _landingWatches[playerOrBot.Slot] = new LandingWatch(Server.TickCount)
                         {
                             TargetZ = position.Z,
@@ -4309,8 +4316,18 @@ public class Freefrag : BasePlugin
                         ownerEyePos.X, ownerEyePos.Y, ownerEyePos.Z);
                     QAngle angle = new QAngle(pitch, yaw, 0);
 
+                    // Teleport the facing only when it has drifted (or the bot was just placed); the eye angles
+                    // below are plain field writes and track every tick. A teleport every tick desynchronised the
+                    // pawn's pose from its hitboxes, so head shots landed as neck and chest hits.
+                    bool turn = !_aimLockApplied.TryGetValue(botSlot, out var applied)
+                        || BotFacing.NeedsTurn(applied.Pitch, applied.Yaw, pitch, yaw, AimLockTurnDegrees);
+                    if (turn)
+                    {
+                        _aimLockApplied[botSlot] = (pitch, yaw);
+                    }
+
                     Server.NextFrame(() => {
-                        if (pitch < 15 && pitch > -15)
+                        if (turn && pitch < 15 && pitch > -15)
                         {
                             bot.PlayerPawn.Value.Teleport(null, angle, null);
                         }

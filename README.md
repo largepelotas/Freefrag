@@ -82,7 +82,7 @@ Explanation of values:
   - 7: Bots use Force-buy weapons.
 - Aim lock for bots
   - 0: CS2's native bot behavior. It works in a consistant manner but is less powerful.
-  - 1: face and track the owning player every tick (plugin aim lock).
+  - 1: face and track the owning player (plugin aim lock; the facing is re-applied only once it has drifted a few degrees, so hitboxes stay in step with the pose).
   - 2: same tracking plus the hard_mode behaviour tree for firing.
 - EquipPlayer:
   - 0: Disabled. To avoid interfering with other weapon related plugins

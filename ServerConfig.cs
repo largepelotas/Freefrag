@@ -69,7 +69,7 @@ public class DefaultConfig
 
     /*
      * 0 = disabled.
-     * 1 = face and track the owning player every tick (plugin aim lock).
+     * 1 = face and track the owning player (plugin aim lock; facing re-applied only on drift, see AimLockTurnDegrees).
      * 2 = same tracking plus the hard_mode behaviour tree for firing.
     */
     public int BotAimLock {get; set; } = 1;
