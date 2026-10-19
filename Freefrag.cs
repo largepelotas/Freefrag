@@ -50,7 +50,7 @@ public class Freefrag : BasePlugin
     private readonly BotRequestQueue _botRequests = new();        // One player's bots spawn at a time; see BotRequestQueue.
     private readonly Dictionary<int, LandingWatch> _landingWatches = new();
     private readonly HashSet<int> _landingTimeoutLogged = new();              // Owner slots whose current route start already logged a landing timeout.
-    private readonly HashSet<int> _heldBots = new();                          // Bot slots held still by the per-tick speed-zero write in OnTickHandler; see FreezeBot.
+    private readonly Dictionary<int, int> _heldBots = new();                  // Bot slot -> tick the stage-1 hold began; see FreezeBot.
     private readonly HashSet<string> _lateWeaponLogged = new();               // Bot names already reported for a late weapon with bots-fire off; cleared on map start.
     private readonly Dictionary<int, (float Pitch, float Yaw)> _aimLockApplied = new();   // Key: bot slot. Angles last teleported by the aim lock; see AimLockTurnDegrees.
     // The aim lock used to teleport every bot's angles every tick. A teleport each tick leaves the pawn's
@@ -1611,13 +1611,17 @@ public class Freefrag : BasePlugin
         
         player.PlayerPawn.Value.Teleport(pos, ang, Vector.Zero);
     }
-    // Holding a bot still. Until 2026-10-19 the pawn was switched to MOVETYPE_VPHYSICS, which stops all
-    // simulation. That froze the server's animation state as well: the bot was still flagged airborne a
-    // few ticks after its teleport, so every frozen bot rendered with bent knees ("floating"), and the
-    // pawn never got gravity or a step-up again. Now the pawn stays MOVETYPE_WALK and fully simulated;
-    // OnTickHandler writes m_flVelocityModifier = 0 every tick for every held bot (the engine recovers
-    // the modifier on its own, which is why once is not enough), so its max speed is 0 and the AI's
-    // movement orders go nowhere while gravity, ground contact, aiming and firing all keep working.
+
+    // Freezing a bot happens in two stages (2026-10-19). Stage 1, the hold: the pawn stays MOVETYPE_WALK
+    // and fully simulated while OnTickHandler writes m_flVelocityModifier = 0 every tick (the engine
+    // recovers the modifier on its own), so its max speed is 0 and the AI's movement orders go nowhere
+    // while gravity, ground contact and the animation state keep running; this is what lets the
+    // server's animation settle into the standing pose. Stage 2, after FreezeHoldTicks: the old
+    // MOVETYPE_VPHYSICS freeze, which stops all simulation and with it the AI's stuck reflex (a bot held
+    // at speed 0 for longer starts jumping on the spot). Freezing straight into VPHYSICS, as before,
+    // captured the airborne pose from the teleport and every frozen bot rendered with bent knees.
+    private const int FreezeHoldTicks = 32;   // 0.5 s at 64 tick: long enough for the landing animation, shorter than the stuck reflex
+
     private void FreezeBot(CCSPlayerController? bot)
     {
         if (bot != null &&
@@ -1630,11 +1634,11 @@ public class Freefrag : BasePlugin
         }
     }
 
-    // Adds or removes the bot from the per-tick speed-zero hold. Releasing restores the normal modifier.
+    // Stage 1 on/off. Releasing restores the normal modifier; stage 2 is applied by the hold pass.
     private void HoldBot(CCSPlayerController bot, bool hold)
     {
         if (hold)
-            _heldBots.Add(bot.Slot);
+            _heldBots[bot.Slot] = Server.TickCount;
         else
             _heldBots.Remove(bot.Slot);
         var pawn = bot.PlayerPawn.Value;
@@ -4289,16 +4293,26 @@ public class Freefrag : BasePlugin
             }
         }
 
-        // Hold pass: keep every frozen bot's speed at zero (see FreezeBot). Dead or gone bots drop out.
+        // Hold pass (freeze stage 1, see FreezeBot): keep each held bot's speed at zero, and once it has
+        // been held for FreezeHoldTicks apply the VPHYSICS freeze (stage 2). Dead or gone bots drop out.
         if (_heldBots.Count > 0)
         {
-            foreach (var heldSlot in _heldBots.ToArray())
+            foreach (var (heldSlot, heldSince) in _heldBots.ToArray())
             {
                 var heldBot = Utilities.GetPlayerFromSlot(heldSlot);
                 var heldPawn = heldBot?.PlayerPawn.Value;
                 if (heldBot == null || !heldBot.IsValid || !heldBot.PawnIsAlive || heldPawn == null)
                 {
                     _heldBots.Remove(heldSlot);
+                    continue;
+                }
+                if (Server.TickCount - heldSince >= FreezeHoldTicks)
+                {
+                    _heldBots.Remove(heldSlot);
+                    heldPawn.Teleport(null, null, Vector.Zero);
+                    SetPlayerFrozen(heldBot, true);
+                    heldPawn.VelocityModifier = 1f;
+                    Utilities.SetStateChanged(heldPawn, "CCSPlayerPawn", "m_flVelocityModifier");
                     continue;
                 }
                 if (heldPawn.VelocityModifier != 0f)
