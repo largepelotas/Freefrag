@@ -2078,6 +2078,7 @@ public class Freefrag : BasePlugin
     //   !freefrag addbot [crouch|stand]   add a draft bot where you stand, facing where you look
     //   !freefrag addbot swing|peek       add a swinger at your feet, then set where it runs to (stand there, type peek)
     //   !freefrag addbot undo|clear|save  remove the last draft bot, discard all, or write them into the route
+    //   !freefrag addbot fix              move the nearest saved target of the route to where you stand (off-mesh fix)
     //   !freefrag newroute <name> [bots]  create an empty route that starts where you stand
     // Pure profile editing lives in RouteEditor.cs.
     // ---------------------------------------------------------------------
@@ -2086,6 +2087,7 @@ public class Freefrag : BasePlugin
     private const float DraftMarkerStandHeight = 64f;
     private const float DraftMarkerCrouchHeight = 48f;
     private const float DraftMarkerFacingLength = 48f;
+    private const float FixTargetMaxDistance = 200f;     // addbot fix moves the nearest target within this many units of the player
 
     private void PrintEditorChat(CCSPlayerController player, string key, params object[] args)
     {
@@ -2195,6 +2197,17 @@ public class Freefrag : BasePlugin
                 ClearDraftBots(slot);
                 PrintEditorChat(player, "addbot.cleared");
                 return;
+            case "fix":
+            {
+                var pawn = player.PlayerPawn.Value;
+                if (!player.IsValid || !player.PawnIsAlive || pawn == null || pawn.AbsOrigin == null)
+                {
+                    PrintEditorChat(player, "addbot.not_practicing");
+                    return;
+                }
+                FixNearestTarget(player, status, pawn.AbsOrigin);
+                return;
+            }
             case "save":
             {
                 var missing = RouteEditor.MissingPeeks(status.DraftBots);
@@ -2293,6 +2306,52 @@ public class Freefrag : BasePlugin
 
         Console.WriteLine($"[Freefrag] Saved {added} bot(s) to {_mapName}/{practice.PracticeName} ({path})");
         PrintEditorChat(player, "addbot.saved", added, practice.PracticeName);
+    }
+
+    /// <summary>
+    /// Moves the saved target nearest to the player's feet to exactly where they stand, in the route file and
+    /// in memory. A target off the nav mesh is never simulated by the engine, so no code can land it; the only
+    /// fix is a new position, and standing on the right spot gives one without getpos or height maths.
+    /// </summary>
+    private void FixNearestTarget(CCSPlayerController player, PlayerStatus status, Vector feet)
+    {
+        var practiceNo = status.PracticeIndex;
+        if (practiceNo < 0 || practiceNo >= _practices.Count)
+        {
+            PrintEditorChat(player, "addbot.not_practicing");
+            return;
+        }
+        var practice = _practices[practiceNo];
+
+        var positions = practice.Targets.Select(t => (t.Position.X, t.Position.Y, t.Position.Z)).ToList();
+        var index = RouteEditor.NearestTarget(positions, feet.X, feet.Y, feet.Z, FixTargetMaxDistance);
+        if (index < 0)
+        {
+            PrintEditorChat(player, "addbot.fix_none", (int)FixTargetMaxDistance);
+            return;
+        }
+
+        var path = $"{ModuleDirectory}/maps/{_mapName}/{practice.PracticeName}.txt";
+        try
+        {
+            var lines = RouteEditor.MoveTarget(File.ReadAllLines(path), index, feet.X, feet.Y, feet.Z);
+            if (lines == null)
+                throw new InvalidDataException($"target {index + 1} has no parsable line in the file");
+            File.WriteAllLines(path, lines);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Freefrag] Failed to fix target {index + 1} of {_mapName}/{practice.PracticeName} ({path}): {ex.Message}");
+            PrintEditorError(player, "addbot.save_failed");
+            return;
+        }
+
+        var old = practice.Targets[index];
+        practice.ReplaceTarget(index, new TargetBot(feet.X, feet.Y, feet.Z, old.Rotation.X, old.Rotation.Y, old.Rotation.Z, old.IsCrouching, old.Peek));
+        _landingNeverMovedLogged.Remove((practice.PracticeName, index));   // let the landing pass report the new spot too, if it is still off the mesh
+
+        Console.WriteLine($"[Freefrag] Route {practice.PracticeName} target {index + 1} moved from ({old.Position.X:F2} {old.Position.Y:F2} {old.Position.Z:F2}) to ({feet.X:F2} {feet.Y:F2} {feet.Z:F2}) by {player.PlayerName} ({path})");
+        PrintEditorChat(player, "addbot.fix_done", practice.PracticeName, index + 1);
     }
 
     private void HandleNewRouteCommand(CCSPlayerController player, string name, string botsArg)
@@ -4233,7 +4292,7 @@ public class Freefrag : BasePlugin
                 // 2026-10-18 and the pawn did not move), so name the route line for the author, once per map load.
                 if (watch.NeverMoved(originZ) && _landingNeverMovedLogged.Add((watch.RouteName, watch.TargetIndex)))
                 {
-                    Console.WriteLine($"[Freefrag] Route {watch.RouteName} target {watch.TargetIndex + 1} (z {watch.TargetZ:F2}): the bot never moved after its teleport, so the spot is probably off the nav mesh and it sits exactly where the file puts it. Re-place it in game with !freefrag addbot and drop the old line.");
+                    Console.WriteLine($"[Freefrag] Route {watch.RouteName} target {watch.TargetIndex + 1} (z {watch.TargetZ:F2}): the bot never moved after its teleport, so the spot is probably off the nav mesh and it sits exactly where the file puts it. Stand on the right spot and run !freefrag addbot fix.");
                 }
                 // A swinger may only be released once it is on the ground and frozen at its hiding spot.
                 if (_ownerOfBots.TryGetValue(watchSlot, out var landedOwner)
