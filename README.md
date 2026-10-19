@@ -339,6 +339,12 @@ The same applies to bot positions: stand where a bot should be and place it, wit
    targets and ahead of the guiding line. Restart the route to spawn them. Leaving the route
    discards unsaved bots.
 
+- A bot that floats or sits in a wall is a target whose line is off the nav mesh; the engine never
+  simulates it, so nothing in the plugin can land it (the server log names the route and target).
+  Stand where the bot should be, run `!freefrag addbot fix`, then restart the route. It moves the
+  nearest saved target (within 200 units) to your feet, keeping its facing, crouch flag and peek
+  spec, and rewrites that line in place.
+
 Run `scripts/pull-routes.sh` afterwards, as above.
 
 ## Swinging bots (this fork)

@@ -117,6 +117,12 @@ public class PrefirePractice
         NumBots = numBots;
     }
 
+    /// <summary>Replaces one loaded target, after "addbot fix" rewrote its line in the route file.</summary>
+    public void ReplaceTarget(int index, TargetBot target)
+    {
+        Targets[index] = target;
+    }
+
     public PrefirePractice(string moduleDirectory, string map, string practice)
     {
         Targets = new List<TargetBot>();

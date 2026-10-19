@@ -45,6 +45,62 @@ public static class RouteEditor
     }
 
     /// <summary>
+    /// Index of the target nearest to (x, y, z), or -1 when none lies within <paramref name="maxDistance"/>.
+    /// Used by "addbot fix", which moves that target to where the player stands.
+    /// </summary>
+    public static int NearestTarget(IReadOnlyList<(float X, float Y, float Z)> targets, float x, float y, float z, float maxDistance)
+    {
+        var best = -1;
+        var bestSquared = maxDistance * maxDistance;
+        for (var i = 0; i < targets.Count; i++)
+        {
+            var dx = targets[i].X - x; var dy = targets[i].Y - y; var dz = targets[i].Z - z;
+            var squared = dx * dx + dy * dy + dz * dz;
+            if (squared <= bestSquared) { best = i; bestSquared = squared; }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// The profile with target <paramref name="targetIndex"/> (0-based, counting target lines in file order,
+    /// as the parser does) moved to (x, y, z). The line is rewritten as <see cref="FormatBotLine"/> writes it,
+    /// keeping its angles, crouch flag and peek spec; a trailing "# comment" is kept too. Every other line is
+    /// untouched. Returns null when the profile has no such target, or its line does not parse.
+    /// </summary>
+    public static List<string>? MoveTarget(IEnumerable<string> profileLines, int targetIndex, float x, float y, float z)
+    {
+        if (targetIndex < 0) return null;
+        var lines = profileLines.ToList();
+
+        var seen = 0;
+        for (var i = 3; i < lines.Count; i++)
+        {
+            if (!IsTargetLine(lines[i])) continue;
+            if (seen++ != targetIndex) continue;
+
+            var w = lines[i].Split(Delimiters);
+            if (!TryNumber(w[3], out var pitch) || !TryNumber(w[4], out var yaw) || !bool.TryParse(w[6], out var crouch))
+                return null;
+            SwingSpec? peek = null;
+            if (SwingSpec.TryParse(w, 7, out var spec, out var error))
+                peek = spec;
+            else if (error != null)
+                return null;
+
+            var line = FormatBotLine(new DraftBot(x, y, z, pitch, yaw, crouch, peek != null, peek));
+            var hash = lines[i].IndexOf('#');
+            if (hash >= 0)
+                line += " " + lines[i][hash..].TrimEnd();
+            lines[i] = line;
+            return lines;
+        }
+        return null;
+    }
+
+    private static bool TryNumber(string token, out float value) =>
+        float.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out value) && float.IsFinite(value);
+
+    /// <summary>
     /// Inserts the bots after the last existing target line (after line 3 when the route has none), which is
     /// always before the guiding-line joints, and clamps line 2's bot count to the new target total.
     /// Every other line is preserved; blank lines at the end are dropped only when nothing follows the targets.

@@ -253,4 +253,89 @@ public class RouteEditorTests
             Directory.Delete(dir, true);
         }
     }
+
+    // --- addbot fix: move an existing target to where the player stands -------------------------
+
+    private static readonly string[] FixProfile =
+    {
+        "",
+        "3 1.0",
+        "0 0 0 0 0 0",
+        "100 100 10 0 90 0 False",
+        "500 500 10 -5.5 180 0 True peek 600 600 10 trigger 300 # behind the box",
+        "900 900 10 0 0 0 False",
+        "100 100 10",
+        "900 900 10",
+    };
+
+    private static readonly (float X, float Y, float Z)[] FixTargets =
+    {
+        (100f, 100f, 10f),
+        (500f, 500f, 10f),
+        (900f, 900f, 10f),
+    };
+
+    // Prevents: fixing the wrong bot when two targets are close, or "fixing" a bot from across the map.
+    [Fact]
+    public void NearestTargetPicksTheClosestWithinRange()
+    {
+        Assert.Equal(1, RouteEditor.NearestTarget(FixTargets, 530f, 540f, 10f, 200f));   // 50 units from target 2
+        Assert.Equal(0, RouteEditor.NearestTarget(FixTargets, 120f, 100f, 10f, 200f));
+        Assert.Equal(-1, RouteEditor.NearestTarget(FixTargets, 300f, 300f, 10f, 200f));  // 283 from both neighbours
+        Assert.Equal(-1, RouteEditor.NearestTarget(Array.Empty<(float, float, float)>(), 0f, 0f, 0f, 200f));
+    }
+
+    // Prevents: the fix moving a different line than the target it names, or dropping the angles,
+    // crouch flag, peek spec or comment of the line it rewrites.
+    [Fact]
+    public void MoveTargetRewritesOnlyThatLineKeepingEverythingButThePosition()
+    {
+        var result = RouteEditor.MoveTarget(FixProfile, 1, 530f, 540f, 12.5f);
+
+        Assert.NotNull(result);
+        Assert.Equal(new[]
+        {
+            "",
+            "3 1.0",
+            "0 0 0 0 0 0",
+            "100 100 10 0 90 0 False",
+            "530.000000 540.000000 12.500000 -5.500000 180.000000 0.000000 True peek 600.000000 600.000000 10.000000 trigger 300 # behind the box",
+            "900 900 10 0 0 0 False",
+            "100 100 10",
+            "900 900 10",
+        }, result);
+    }
+
+    [Fact]
+    public void MoveTargetReturnsNullForAMissingTarget()
+    {
+        Assert.Null(RouteEditor.MoveTarget(FixProfile, 3, 0f, 0f, 0f));
+        Assert.Null(RouteEditor.MoveTarget(FixProfile, -1, 0f, 0f, 0f));
+    }
+
+    // Prevents: a fixed line the real parser reads back differently from what the editor meant.
+    [Fact]
+    public void MovedTargetParsesBack()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "freefrag-route-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "maps", "de_test"));
+        try
+        {
+            File.WriteAllLines(Path.Combine(dir, "maps", "de_test", "mine.txt"), RouteEditor.MoveTarget(FixProfile, 1, 530f, 540f, 12.5f)!);
+
+            var practice = new PrefirePractice(dir, "de_test", "mine");
+
+            Assert.Equal(3, practice.Targets.Count);
+            Assert.Equal(530f, practice.Targets[1].Position.X);
+            Assert.Equal(12.5f, practice.Targets[1].Position.Z);
+            Assert.Equal(180f, practice.Targets[1].Rotation.Y);
+            Assert.True(practice.Targets[1].IsCrouching);
+            Assert.Equal(new SwingSpec(600f, 600f, 10f, 300f), practice.Targets[1].Peek);
+            Assert.Equal(2, practice.GuidingLine.Count);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
 }
