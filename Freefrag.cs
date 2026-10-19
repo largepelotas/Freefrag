@@ -1632,6 +1632,33 @@ public class Freefrag : BasePlugin
             bot.PlayerPawn.Value.MoveType = MoveType_t.MOVETYPE_VPHYSICS;
             Schema.SetSchemaValue(bot.PlayerPawn.Value.Handle, "CBaseEntity", "m_nActualMoveType", 5);
             Utilities.SetStateChanged(bot.PlayerPawn.Value, "CBaseEntity", "m_MoveType");
+            MarkGrounded(bot.PlayerPawn.Value);
+        }
+    }
+
+    // On the live server bots never carry FL_ONGROUND or a ground entity by the time the landing watch
+    // settles, and a frozen pawn is never simulated again, so the client keeps rendering it in the
+    // airborne pose: bent knees, feet hanging a few units above the floor ("floating bots",
+    // 2026-10-19 screenshot). Stamp the grounded state on the pawn once it is frozen so the animation
+    // and the standing weapon accuracy apply. Nothing here changes the origin.
+    private void MarkGrounded(CCSPlayerPawn pawn)
+    {
+        try
+        {
+            pawn.Flags |= FL_ONGROUND;
+            Utilities.SetStateChanged(pawn, "CBaseEntity", "m_fFlags");
+            var world = Utilities.GetEntityFromIndex<CBaseEntity>(0);
+            if (world != null && world.IsValid)
+            {
+                pawn.GroundEntity.Raw = world.EntityHandle.Raw;
+                Utilities.SetStateChanged(pawn, "CBaseEntity", "m_hGroundEntity");
+            }
+            pawn.OnGroundLastTick = true;
+            Utilities.SetStateChanged(pawn, "CCSPlayerPawn", "m_bOnGroundLastTick");
+        }
+        catch (System.Exception e)
+        {
+            LogHookErrorOnce(nameof(MarkGrounded), e);
         }
     }
 
