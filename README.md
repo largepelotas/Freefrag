@@ -374,6 +374,12 @@ Bots only move on the nav mesh. Two console lines point at a bad spot: `Route <n
 after its teleport), and `Swinger <bot> on <route> target <n> never reached its peek point; frozen
 after 2 s` means the bot was released but its path never came within 30 units of the peek point.
 
+To check a whole route against the nav mesh offline, run `scripts/navsnap.py` (Python 3, no
+dependencies) with the map's `.vpk` or `.nav` and the route files: it prints each target's distance
+outside the nearest nav area and its height above that area, and with `--all` rewrites targets more
+than 10 units outside or 20 units above the mesh to the nearest walkable point. A height of about
++5 is normal; a large positive one can be a real floor the mesh does not cover, so look before moving.
+
 Limits of this first version: a swinger does not return to cover, and there is no choice of
 swing direction.
 
