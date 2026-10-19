@@ -50,6 +50,7 @@ public class Freefrag : BasePlugin
     private readonly BotRequestQueue _botRequests = new();        // One player's bots spawn at a time; see BotRequestQueue.
     private readonly Dictionary<int, LandingWatch> _landingWatches = new();
     private readonly HashSet<int> _landingTimeoutLogged = new();              // Owner slots whose current route start already logged a landing timeout.
+    private readonly HashSet<int> _heldBots = new();                          // Bot slots held still by the per-tick speed-zero write in OnTickHandler; see FreezeBot.
     private readonly HashSet<string> _lateWeaponLogged = new();               // Bot names already reported for a late weapon with bots-fire off; cleared on map start.
     private readonly Dictionary<int, (float Pitch, float Yaw)> _aimLockApplied = new();   // Key: bot slot. Angles last teleported by the aim lock; see AimLockTurnDegrees.
     // The aim lock used to teleport every bot's angles every tick. A teleport each tick leaves the pawn's
@@ -356,6 +357,7 @@ public class Freefrag : BasePlugin
             CancelBotAddTimers(ownerSlot);
         }
         _landingWatches.Clear();
+        _heldBots.Clear();
         foreach (var botSlot in _ownerOfBots.Keys.ToList())
         {
             KickBot(botSlot);
@@ -412,6 +414,7 @@ public class Freefrag : BasePlugin
             status.Bots.Clear();
         }
         _landingWatches.Clear();
+        _heldBots.Clear();
 
         UnregisterCommand();
         _screenMenu?.Clear();
@@ -1608,61 +1611,37 @@ public class Freefrag : BasePlugin
         
         player.PlayerPawn.Value.Teleport(pos, ang, Vector.Zero);
     }
-
-    // MOVETYPE_VPHYSICS halts all simulation on the pawn (no gravity, no movement), so it must only
-    // be applied once the bot has landed. The landing watch in OnTickHandler does that: it waits for
-    // ground contact after the route teleport and then calls this. A pawn frozen while FL_ONGROUND is
-    // set keeps that flag, so weapon accuracy is the standing value rather than the airborne one.
-    // MOVETYPE_NONE was considered as an alternative, but VPHYSICS is the known-good state that still
-    // lets bots aim and fire, so it stays.
+    // Holding a bot still. Until 2026-10-19 the pawn was switched to MOVETYPE_VPHYSICS, which stops all
+    // simulation. That froze the server's animation state as well: the bot was still flagged airborne a
+    // few ticks after its teleport, so every frozen bot rendered with bent knees ("floating"), and the
+    // pawn never got gravity or a step-up again. Now the pawn stays MOVETYPE_WALK and fully simulated;
+    // OnTickHandler writes m_flVelocityModifier = 0 every tick for every held bot (the engine recovers
+    // the modifier on its own, which is why once is not enough), so its max speed is 0 and the AI's
+    // movement orders go nowhere while gravity, ground contact, aiming and firing all keep working.
     private void FreezeBot(CCSPlayerController? bot)
     {
-        // Console.WriteLine($"[Freefrag] DEBUG: Trying to freeze a bot.");
         if (bot != null &&
-            bot is { IsValid: true, IsBot: true, IsHLTV: false, PawnIsAlive: true } 
+            bot is { IsValid: true, IsBot: true, IsHLTV: false, PawnIsAlive: true }
             && bot.PlayerPawn.Value != null
         )
         {
-            // Console.WriteLine($"[Freefrag] DEBUG: Bot {bot.PlayerName} freezed.");
-
-            // Kill any residual velocity first; VPHYSICS would otherwise keep it.
-            bot.PlayerPawn.Value.Teleport(null, null, Vector.Zero);
-
-            // Only the engine's internal move type (m_nActualMoveType) is switched to VPHYSICS, which is what
-            // stops the simulation. The networked m_MoveType stays WALK so the client keeps the standing
-            // animation: with VPHYSICS networked too, every frozen bot rendered in the airborne pose (bent
-            // knees) even after FL_ONGROUND was stamped (2026-10-19). SetPlayerFrozen still sets both.
-            Schema.SetSchemaValue(bot.PlayerPawn.Value.Handle, "CBaseEntity", "m_nActualMoveType", 5);
-            bot.PlayerPawn.Value.MoveType = MoveType_t.MOVETYPE_WALK;
-            Utilities.SetStateChanged(bot.PlayerPawn.Value, "CBaseEntity", "m_MoveType");
-            MarkGrounded(bot.PlayerPawn.Value);
+            bot.PlayerPawn.Value.Teleport(null, null, Vector.Zero);   // drop any residual velocity
+            HoldBot(bot, true);
         }
     }
 
-    // On the live server bots never carry FL_ONGROUND or a ground entity by the time the landing watch
-    // settles, and a frozen pawn is never simulated again, so the client keeps rendering it in the
-    // airborne pose: bent knees, feet hanging a few units above the floor ("floating bots",
-    // 2026-10-19 screenshot). Stamp the grounded state on the pawn once it is frozen so the animation
-    // and the standing weapon accuracy apply. Nothing here changes the origin.
-    private void MarkGrounded(CCSPlayerPawn pawn)
+    // Adds or removes the bot from the per-tick speed-zero hold. Releasing restores the normal modifier.
+    private void HoldBot(CCSPlayerController bot, bool hold)
     {
-        try
-        {
-            pawn.Flags |= FL_ONGROUND;
-            Utilities.SetStateChanged(pawn, "CBaseEntity", "m_fFlags");
-            var world = Utilities.GetEntityFromIndex<CBaseEntity>(0);
-            if (world != null && world.IsValid)
-            {
-                pawn.GroundEntity.Raw = world.EntityHandle.Raw;
-                Utilities.SetStateChanged(pawn, "CBaseEntity", "m_hGroundEntity");
-            }
-            pawn.OnGroundLastTick = true;
-            Utilities.SetStateChanged(pawn, "CCSPlayerPawn", "m_bOnGroundLastTick");
-        }
-        catch (System.Exception e)
-        {
-            LogHookErrorOnce(nameof(MarkGrounded), e);
-        }
+        if (hold)
+            _heldBots.Add(bot.Slot);
+        else
+            _heldBots.Remove(bot.Slot);
+        var pawn = bot.PlayerPawn.Value;
+        if (pawn == null)
+            return;
+        pawn.VelocityModifier = hold ? 0f : 1f;
+        Utilities.SetStateChanged(pawn, "CCSPlayerPawn", "m_flVelocityModifier");
     }
 
     private static void SetPlayerFrozen(CCSPlayerController? player, bool frozen)
@@ -1685,7 +1664,8 @@ public class Freefrag : BasePlugin
         if (bot == null || !bot.IsValid || !bot.PawnIsAlive)
             return;
 
-        // Unfreeze exactly as SetPlayerFrozen does; the behaviour tree then runs the bot at the nearest human.
+        // Lift the speed-zero hold (and any old move-type freeze); the behaviour tree then runs the bot at the nearest human.
+        HoldBot(bot, false);
         SetPlayerFrozen(bot, false);
         state.Released = true;
         state.ReleasedTick = Server.TickCount;
@@ -4149,6 +4129,7 @@ public class Freefrag : BasePlugin
     private void KickBot(int botSlot)
     {
         _landingWatches.Remove(botSlot);
+        _heldBots.Remove(botSlot);
 
         // The ownership records are dropped here, synchronously, even though the kick itself happens
         // later in the engine: callers (FinishRoute, the remaining-targets count) need Bots accurate
@@ -4304,6 +4285,26 @@ public class Freefrag : BasePlugin
                 if (menuPlayer != null && menuPlayer.IsValid && !menuPlayer.IsBot)
                 {
                     _screenMenu.Tick(menuPlayer);
+                }
+            }
+        }
+
+        // Hold pass: keep every frozen bot's speed at zero (see FreezeBot). Dead or gone bots drop out.
+        if (_heldBots.Count > 0)
+        {
+            foreach (var heldSlot in _heldBots.ToArray())
+            {
+                var heldBot = Utilities.GetPlayerFromSlot(heldSlot);
+                var heldPawn = heldBot?.PlayerPawn.Value;
+                if (heldBot == null || !heldBot.IsValid || !heldBot.PawnIsAlive || heldPawn == null)
+                {
+                    _heldBots.Remove(heldSlot);
+                    continue;
+                }
+                if (heldPawn.VelocityModifier != 0f)
+                {
+                    heldPawn.VelocityModifier = 0f;
+                    Utilities.SetStateChanged(heldPawn, "CCSPlayerPawn", "m_flVelocityModifier");
                 }
             }
         }
